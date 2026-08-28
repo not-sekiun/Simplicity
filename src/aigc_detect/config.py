@@ -1,0 +1,28 @@
+"""Central paths and constants shared across the project."""
+
+from pathlib import Path
+
+# Repo root: src/aigc_detect/config.py -> aigc_detect -> src -> <repo root>
+ROOT_DIR = Path(__file__).resolve().parents[2]
+
+DATA_DIR = ROOT_DIR / "data"
+RAW_DIR = DATA_DIR / "raw"
+PROCESSED_DIR = DATA_DIR / "processed"
+
+TRAIN_MANIFEST = PROCESSED_DIR / "train.csv"
+VAL_MANIFEST = PROCESSED_DIR / "val.csv"
+
+# Canonical labels used everywhere in the pipeline.
+LABEL_REAL = 0
+LABEL_AIGC = 1
+LABEL_NAMES = {LABEL_REAL: "real", LABEL_AIGC: "aigc"}
+
+# Model input resolution and normalization (ImageNet stats — matches most
+# torchvision/timm backbones under the 2B-parameter limit).
+IMAGE_SIZE = 224
+NORM_MEAN = (0.485, 0.456, 0.406)
+NORM_STD = (0.229, 0.224, 0.225)
+
+# Train/val split.
+VAL_FRACTION = 0.15
+RANDOM_SEED = 42

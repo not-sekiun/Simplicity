@@ -1,0 +1,30 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Data (downloaded datasets, generated splits/manifests, previews)
+data/raw/**
+data/processed/**
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+*.png
+!docs/**/*.png
+checkpoints/
+outputs/
+runs/
+wandb/
+
+# Credentials
+.env
+kaggle.json
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,30 @@
+[project]
+name = "aigc-detect"
+version = "0.1.0"
+description = "Robust detection of AI-generated images under real-world transformations (TikTok TechJam 2026)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "numpy",
+    "pillow",
+    "pandas",
+    "scikit-learn",
+    "tqdm",
+    "pyyaml",
+    "kagglehub",
+    "datasets",
+    "huggingface-hub",
+]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu130" }]
+torchvision = [{ index = "pytorch-cu130" }]
+torchaudio = [{ index = "pytorch-cu130" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
