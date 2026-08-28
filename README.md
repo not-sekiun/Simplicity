@@ -5,9 +5,12 @@ Robust detection of AI-generated images under real-world transformations
 
 ## Status
 
-This repo currently holds the **project scaffold**: environment, dataset
-download/indexing scripts, and the data augmentation / robustness-eval
-transform pipeline. Model training/inference code is not built yet.
+Environment, dataset download/indexing scripts, and the data augmentation /
+robustness-eval transform pipeline are built and verified. Local data is
+downloaded: **CIFAKE** (full, 120k images) + **SID_Set** (4000/class subset,
+8k images) are indexed and split into `data/processed/{train,val}.csv`
+(108,800 train / 19,200 val, stratified by source+label). WildFake is not
+yet ingested (see below). Model training/inference code is not built yet.
 
 ## Setup
 
