@@ -606,6 +606,109 @@ not a chain. Heavy sensor noise is the next axis to attack.
 
 ---
 
+## 2g. What the paper actually says about backbones (fetched 2026-08-29)
+
+Pulled from the full text of arXiv:2602.01738, not from memory. **Our registry
+does not match the paper's variants**, which changes how much its ranking can
+be trusted here.
+
+### The paper's numbers
+
+| Backbone | GenImage avg acc | In-the-wild avg | AIGIHolmes | AIGI-Now |
+|---|---|---|---|---|
+| DINOv3-Linear | **0.964** | **0.940** | 0.972 | 0.864 |
+| SigLIP2-Linear | 0.945 | 0.822 | — | — |
+| PE-CLIP-Linear | 0.938 | 0.899 | **0.978** | 0.891 |
+| MetaCLIP2-Linear | 0.892 | 0.842 | 0.942 | **0.907** |
+| DINOv2-Linear | 0.852 | 0.636 | — | — |
+| SigLIP-Linear | 0.851 | 0.610 | — | — |
+| MetaCLIP-Linear | 0.766 | 0.654 | — | — |
+
+### Robustness (Table 7, Chameleon) — the part that matters to us
+
+| Backbone | Base | JPEG-65 | **Blur sigma=2.0** |
+|---|---|---|---|
+| MetaCLIP2-Linear | 0.930 | 0.898 | **0.932** (improves) |
+| DINOv3-Linear | 0.914 | 0.891 | **0.891** |
+| PE-CLIP-Linear | **0.959** | 0.921 | **0.778** (collapses) |
+| SigLIP2-Linear | 0.858 | 0.828 | 0.671 |
+
+Real-world transmission (Table 8, RRDataset): MetaCLIP2 leads on recapture
+(0.719 vs DINOv3 0.647 vs PE-CLIP 0.548); DINOv3 and MetaCLIP2 tie on social
+transfer (~0.712).
+
+**The paper independently confirms our own measurement.** It reports PE-CLIP
+with the highest clean baseline of any backbone *and* the worst blur
+collapse (0.959 -> 0.778). Our clean-trained head showed exactly that shape:
+clean 0.9987, `blur_sigma2.0` 0.8668 with balanced accuracy at chance. Our
+augmented training then lifted `blur_sigma2.0` to 0.9646 -- i.e. **the
+augmentation compensated for a documented, backbone-specific weakness.**
+
+### Three caveats before racing on these numbers
+
+1. **We cannot use the paper's winner.** Its DINOv3 is **ViT-7B/16** (1664-dim).
+   Seven billion parameters violates the competition's hard <2B rule. Our
+   `dinov3-l` is ViT-Large/16 (1024-dim) -- a different model that happens to
+   share a family name.
+2. **Only PE-Core-L matches exactly.** Paper MetaCLIP2 is *Worldwide Giant*
+   (1664-dim); our `metaclip2-h` is *Worldwide Huge* (1280-dim). Paper DINOv2
+   runs at 224px; ours at 518px. So for three of four registry entries the
+   paper's ranking is evidence about a **family**, not about the checkpoint we
+   would actually ship.
+3. **The paper reports no Gaussian-noise robustness at all** -- only JPEG and
+   blur. Our binding weakness is noise (`noise_sigma0.1` 0.9179, and the
+   ceiling probe showed it does not respond to augmentation). So on the one
+   axis we most need to fix, the paper offers no guidance and the race is a
+   genuine experiment rather than a confirmation.
+
+### How much room is actually left?
+
+Decomposing the remaining distance to a perfect 1.0, on the current shipping
+head (Run 6):
+
+```
+val       score 0.9892   headroom 0.0108
+  of which AUC_clean  0.9981 -> 0.5 * 0.0019 = 0.0010   ( 9% of headroom)
+           AUC_robust 0.9803 -> 0.5 * 0.0197 = 0.0099   (91% of headroom)
+
+demo-val  score 0.9984   headroom 0.0016   -- effectively saturated
+```
+
+**91% of what is left sits in AUC_robust, and it is concentrated in six
+cells:** `noise_sigma0.1` 0.9179, `chain_heavy` 0.9182, `resize_0.25x` 0.9546,
+`chain_medium` 0.9591, `noise_sigma0.05` 0.9597, `blur_sigma2.0` 0.9646.
+
+A backbone that fixed the three noise views outright (3 of 17 pooled views)
+would move pooled to roughly 0.986-0.988 and the score to ~0.992-0.993:
+**a gain of +0.003 to +0.004.** A uniformly better backbone might reach
++0.006. On demo-val, ~+0.001.
+
+**So the race is competing for about half a point on our own benchmarks, and
+they can no longer discriminate.** The paper's in-the-wild spread between
+these same backbones is *ten points* (0.940 / 0.899 / 0.842); ours is half a
+point, because our val is in-distribution and both our sets are saturated.
+
+That is an argument for racing *carefully*, not for skipping it: judge the
+race on the **weak cells and the worst-case score**, which still have real
+range (0.9179 to 1.0), and treat the pooled headline as uninformative. And
+weight the paper's in-the-wild evidence over our own val when the two
+disagree -- our val cannot see the difference it is being asked about.
+
+### Consequence for the race
+
+Race **`metaclip2-h` and `dinov3-l`** and skip `dinov2-g`: the paper puts
+DINOv2 second-from-bottom on both benchmarks (0.852 / 0.636), and at 518px it
+is by far the most expensive to embed (~2.4x PE-Core's pixels, 3.6x its
+parameters -- an estimated 3 hours against ~30 minutes each for the other
+two). Spending three hours on the candidate the paper ranks near-last is the
+worst available trade.
+
+Worth checking separately: whether MetaCLIP2 *Worldwide Giant* (the variant
+the paper actually benchmarked) fits under 2B params. If it does, it is a
+better race entrant than our current `huge`.
+
+---
+
 ## 3. What was built
 
 ### Wave 1

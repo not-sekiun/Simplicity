@@ -4,6 +4,35 @@ Every model run, in order, with what it changed and what it taught. This is
 the "how we got here" document; `FINDINGS.md` holds the forensics and the
 traps, `AGENTS.md` holds the current-state map.
 
+## Comparability epochs — READ BEFORE COMPARING ANY TWO NUMBERS
+
+Numbers in this file are only comparable **within** an epoch. An epoch ends
+when something changes what a cached embedding *means*. Cross-epoch
+comparison produces differences that look like results and are artifacts.
+
+| Epoch | Boundary | Caches | Status |
+|---|---|---|---|
+| **E0** | anything before the 2026-08-29 trap fixes | — | **INVALID, discard.** Noise views destroyed 84.5% of every image (trap 8), wrong normalization constants (trap 9), nondeterministic views (trap 10). No number survives. |
+| **E1** | commit `1c6fa35` | `pe-core-l__val__*.npz` (15 views, full 4,200-row val) | **Superseded.** Index-based seeding (trap 12) and one global `transform_fingerprint` (trap 13). No published number came from it. Automatically reported STALE by the per-view fingerprint, so it cannot be silently mixed in. |
+| **E2** | commit `abc28a7` onward — **current** | `*__val-s2000__*`, `*__demo_val-s2000__*`, `*__train-s6000__*` | **Valid and mutually comparable.** Path-based seeding, per-view fingerprints, 18 scored views + 4 training chains. **Runs 4, 5, 6 and the ceiling probe all live here.** |
+
+Within E2 there is one further caveat: **Run 4's head trained on 23,800 clean
+rows; Runs 5, 6 and the ceiling probe used 6,000.** Their *evaluations* are
+directly comparable (identical eval caches), but Run 4 is **not** a controlled
+control for the augmentation ablation. That role belongs to Run 5's
+clean-only arm, which uses the same 6,000 images. This is why the ablation
+tables in section 2f compare cleanonly / aug / augchain and exclude Run 4.
+
+**What would open E3** (and force a full recompute + a new comparability
+block here): changing any severity in the 5.2 table, changing the noise
+domain (see the open question in FINDINGS 2f), re-running `main.py split`,
+or changing `--sample-rows` / `--sample-seed`. Adding a *new* named view does
+not — per-view fingerprints mean only the changed view invalidates. **Prefer
+adding a new view name over redefining an existing one**, precisely so the
+history in this file stays readable.
+
+---
+
 **Ground rules for anything added here:**
 
 - One row per *run*, never per hope. A number goes in only after it was
