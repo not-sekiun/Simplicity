@@ -49,3 +49,13 @@ reports/error_analysis/**
 
 # Extended training slice (downloaded)
 data/train_ext/**
+
+# Manifests ARE committed - they are the contract that defines every cache
+# fingerprint. Secondary machines must get them byte-identical, never rebuild
+# them with `split` (see scripts/worker.py). Images stay ignored.
+!data/processed/*.csv
+!data/ood/ood.csv
+!data/heldout/heldout.csv
+!data/demo_val/demo_val.csv
+!data/train_ext/*.csv
+!data/raw/tiny_genimage_index.csv
