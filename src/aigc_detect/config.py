@@ -10,6 +10,12 @@ RAW_DIR = DATA_DIR / "raw"
 PROCESSED_DIR = DATA_DIR / "processed"
 
 TRAIN_MANIFEST = PROCESSED_DIR / "train.csv"
+# Union of train.csv and the data/train_ext/ generator-diverse slice. A SEPARATE
+# manifest on purpose: adding those images to data/raw/ and re-running `split`
+# would rewrite train.csv/val.csv in place, silently invalidating every cache
+# keyed on their fingerprints. A new name means a new cache stem, so nothing
+# already computed goes stale. See scripts/make_train_ext.py.
+TRAIN_EXT_MANIFEST = PROCESSED_DIR / "train_ext.csv"
 VAL_MANIFEST = PROCESSED_DIR / "val.csv"
 
 # Three-tier data separation:

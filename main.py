@@ -122,6 +122,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from aigc_detect.config import (  # noqa: E402
+    TRAIN_EXT_MANIFEST,
     OOD_MANIFEST,
     ROOT_DIR,
     DEMO_VAL_DIR,
@@ -305,6 +306,7 @@ def _resolve_manifest(name: str):
     """
     manifests = {
         "train": TRAIN_MANIFEST,
+        "train-ext": TRAIN_EXT_MANIFEST,
         "val": VAL_MANIFEST,
         "heldout": HELDOUT_MANIFEST,
         "demo-val": DEMO_VAL_MANIFEST,
@@ -313,7 +315,8 @@ def _resolve_manifest(name: str):
     manifest = manifests[name]
     if not manifest.exists():
         hint = {"demo-val": "build-demo-val", "heldout": "build-heldout",
-                "ood": "download-ood` then `main.py build-ood"}.get(name, "split")
+                "ood": "download-ood` then `main.py build-ood",
+                "train-ext": "python scripts/make_train_ext.py"}.get(name, "split")
         print(f"No {name} manifest at {manifest}. Run `main.py {hint}` first.")
         sys.exit(1)
     return manifest
@@ -357,7 +360,8 @@ def cmd_train_head_views(args):
     from aigc_detect.embed_views import cache_stem
     from aigc_detect.train_head import TRAIN_VIEWS_DEFAULT, TRAIN_VIEWS_WITH_CHAINS, train_head_on_views
 
-    train_stem = cache_stem(TRAIN_MANIFEST, sample_rows=args.train_sample_rows)
+    train_manifest = TRAIN_EXT_MANIFEST if args.train_manifest == 'train-ext' else TRAIN_MANIFEST
+    train_stem = cache_stem(train_manifest, sample_rows=args.train_sample_rows)
     val_stem = cache_stem(VAL_MANIFEST, sample_rows=args.val_sample_rows)
     views = tuple(args.train_views) if args.train_views else TRAIN_VIEWS_DEFAULT
     if args.with_chains:
@@ -376,7 +380,7 @@ def cmd_train_head_views(args):
         batch_size=args.batch_size,
         weight_decay=args.weight_decay,
         out_path=args.out,
-        train_manifest=TRAIN_MANIFEST,
+        train_manifest=train_manifest,
         train_sample_rows=args.train_sample_rows,
         val_manifest=VAL_MANIFEST,
         val_sample_rows=args.val_sample_rows,
@@ -561,7 +565,7 @@ def build_parser() -> argparse.ArgumentParser:
         "embed", help='Precompute + cache pooled embeddings for a manifest under data/embeddings/.'
     )
     p_embed.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
-    p_embed.add_argument("--manifest", required=True, choices=["train", "val", "heldout", "demo-val", "ood"])
+    p_embed.add_argument("--manifest", required=True, choices=["train", "train-ext", "val", "heldout", "demo-val", "ood"])
     p_embed.add_argument("--batch-size", type=int, default=64)
     p_embed.add_argument("--num-workers", type=int, default=4)
     p_embed.add_argument("--force", action="store_true", help="Recompute even if the cached .npz already exists.")
@@ -575,7 +579,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Precompute cached embeddings for every robustness view (5.2 table) of a manifest.",
     )
     p_embed_views.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
-    p_embed_views.add_argument("--manifest", required=True, choices=["train", "val", "heldout", "demo-val", "ood"])
+    p_embed_views.add_argument("--manifest", required=True, choices=["train", "train-ext", "val", "heldout", "demo-val", "ood"])
     p_embed_views.add_argument(
         "--views", nargs="+", default=None, metavar="VIEW",
         help="Only compute these views (default: all 18). E.g. --views clean blur_sigma2.0 chain_heavy",
@@ -616,6 +620,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_thv.add_argument("--train-views", nargs="+", default=None, metavar="VIEW",
                        help="Views to TRAIN on (default: one severity per family; the rest, "
                             "including all chains, stay held out and are only evaluated).")
+    p_thv.add_argument("--train-manifest", default="train", choices=["train", "train-ext"],
+                       help="Which training manifest to read cached views for (default: train).")
     p_thv.add_argument("--with-chains", action="store_true",
                        help="Also train on the 4 trainchain_* views (composition, built only from "
                             "severities already in the default set). The 3 SCORED chains stay held out.")
@@ -635,7 +641,7 @@ def build_parser() -> argparse.ArgumentParser:
         "eval-grid", help="Score a trained head across every cached robustness view (5.5.4)."
     )
     p_eval_grid.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
-    p_eval_grid.add_argument("--manifest", required=True, choices=["train", "val", "heldout", "demo-val", "ood"])
+    p_eval_grid.add_argument("--manifest", required=True, choices=["train", "train-ext", "val", "heldout", "demo-val", "ood"])
     p_eval_grid.add_argument("--head", default=None, help="Head checkpoint (default: models/<backbone>__<kind>.pt).")
     p_eval_grid.add_argument("--head-kind", default="linear", choices=["linear", "mlp"],
                              help="Only used to locate the default checkpoint path.")
@@ -657,7 +663,7 @@ def build_parser() -> argparse.ArgumentParser:
              "Needs embed-views cached for the same (backbone, manifest, sample-rows) first.",
     )
     p_err.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
-    p_err.add_argument("--manifest", required=True, choices=["train", "val", "heldout", "demo-val", "ood"])
+    p_err.add_argument("--manifest", required=True, choices=["train", "train-ext", "val", "heldout", "demo-val", "ood"])
     p_err.add_argument("--head", default=None, help="Head checkpoint (default: models/<backbone>__<kind>.pt).")
     p_err.add_argument("--head-kind", default="linear", choices=["linear", "mlp"],
                         help="Only used to locate the default checkpoint path.")
