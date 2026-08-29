@@ -282,6 +282,35 @@ def evaluate_grid(
         print("\nper-generator AUC (that generator's fakes vs ALL reals):")
         print(f"  {'generator':<18} {'family':<10} {'seen?':<8} {'n':>5} {'clean':>8} {'degraded':>9}")
         print("  " + "-" * 62)
+        # REAL sources first. The per-generator table below breaks down only the
+        # AIGC half and pools every real image into one undifferentiated mass --
+        # which is exactly how a catastrophic failure hid in plain sight
+        # (FINDINGS 2h): ood AUC read 0.9532 and looked healthy while 110/110
+        # human portraits were being called AI-generated at probability 1.000.
+        # An aggregate cannot show that; a per-source FPR can, so it prints
+        # first and unconditionally.
+        print("\nper-REAL-source false positive rate (real images wrongly flagged AIGC):")
+        print(f"  {'real source':<18} {'n':>6} {'FPR@t':>8} {'FPR@0.5':>9} {'FPR@0.99':>9} {'mean P':>8}")
+        print("  " + "-" * 62)
+        worst_real = None
+        for gen in sorted(set(generators)):
+            if not gen or GENERATOR_FAMILY.get(gen) != "real":
+                continue
+            m = (generators == gen) & (clean["labels"] == 0)
+            n = int(m.sum())
+            if n < 10:
+                continue
+            pr = clean["probs"][m]
+            row = (gen, n, float((pr >= threshold).mean()), float((pr >= 0.5).mean()),
+                   float((pr >= 0.99).mean()), float(pr.mean()))
+            print(f"  {row[0]:<18} {row[1]:>6} {row[2]:>8.3f} {row[3]:>9.3f} {row[4]:>9.3f} {row[5]:>8.3f}")
+            if worst_real is None or row[2] > worst_real[2]:
+                worst_real = row
+        if worst_real and worst_real[2] > 0.25:
+            print(f"  ** '{worst_real[0]}' is confidently misread: FPR@0.99 = {worst_real[4]:.3f}. A real")
+            print("  ** domain absent from training gets mapped into AIGC territory at saturation,")
+            print("  ** which no threshold can fix. Expand the REAL corpus by DOMAIN. FINDINGS 2h.")
+
         fam_rows: dict[str, list] = {}
         for gen in sorted(set(generators)):
             if not gen or GENERATOR_FAMILY.get(gen) == "real":
