@@ -404,6 +404,41 @@ JPEG fails in the **opposite direction**: TPR drops to 0.73 with FPR pinned at
 per-degradation calibration, and it is invisible to AUC alone — trap 15
 covers why it is also invisible if the threshold rule is chosen carelessly.
 
+### A resolution asymmetry exists in the training data, but the head is not riding it
+
+Measured over 1,600 sampled `train.csv` rows:
+
+```
+resolution alone (max-dim): AUC=0.5814   best bacc=0.7554 at max-dim <= 256
+  label 0 (real): median 500  p10 315  p90  550   6.9% are <=256px
+  label 1 (AIGC): median 256  p10 128  p90 1024  58.0% are <=256px
+```
+
+**0.7554 balanced accuracy from image size alone.** Weaker than SID_Set's
+aspect-ratio shortcut (0.9775) but real, and mechanistically linked to the
+blur/resize failure above: every pipeline resizes to 336px, so the asymmetry
+reaches the model as *sharpness* — a 256px image upscaled to 336 is smooth, a
+500px image downscaled to 336 is not.
+
+Two pieces of evidence say the head is nevertheless **not** simply reading
+resolution:
+
+1. Correlating clean-view P(AIGC) against source resolution *within* each true
+   class: `reals rho=-0.053 (p=0.09, n.s.)`, `AIGC rho=-0.233 (p=9e-14)`. If
+   the model rode resolution, low-res *reals* would score high. They do not.
+2. On demo-val the class/resolution relationship is **inverted** — real median
+   640px vs AIGC median 1024px, against train's 500 vs 256 — and clean AUC is
+   still 0.9935. A resolution-riding model collapses there; this one does not.
+
+So the honest statement is narrower than "it learned smooth means generated":
+blur and resize move real embeddings **along the head's AIGC direction**, and
+the training asymmetry is the plausible reason that direction has a sharpness
+component, but the failure does not reduce to a resolution readout.
+
+Do not "fix" this by resolution-matching the training data before testing
+whether augmented-view training removes it — that would be an expensive
+intervention against a shortcut the model is measurably not using.
+
 ### Chains: worst view overall, but they partially self-correct
 
 ```
@@ -606,9 +641,32 @@ the **same dataset family the paper trains on**.
       **Subsample images, never views.** The entire premise of the race is
       that backbones fail on *different* transforms; dropping views removes
       the signal being measured.
-- [ ] Augmentation ablation: clean-only vs clean + K precomputed degraded views,
-      scored on the grid. See trap 4 — this only became answerable now that the
-      data is clean.
+- [x] **Augmentation ablation** — DONE 2026-08-29, trap 4's hypothesis
+      confirmed and it is the largest single win so far. Training the head on
+      clean + 6 degraded views of the same 6,000 images
+      (`main.py train-head-views`) moves val `0.5*clean+0.5*robust` from
+      **0.9472 to 0.9878** and demo-val from **0.9631 to 0.9978**, at no cost
+      to clean AUC. Every held-out view improved, including the three chains
+      the head never saw, so it is not memorization. Blur/resize FPR falls
+      from 0.90-0.98 to 0.05-0.21 — Run 4's calibration collapse is repaired.
+
+      Controlled for compute: the augmented arm sees 7x more rows per epoch,
+      so the clean-only control was re-run at 14 epochs. It got **worse** on
+      robustness (0.8993 -> 0.8767) while clean rose to 0.9996. **Clean-only
+      training trades robustness away for clean accuracy**; the gain is
+      augmentation, not budget.
+
+      Full detail and per-view tables in NARRATIVE.md Run 5.
+
+- [ ] **Chained views in TRAINING** — the one gap Run 5 left open. Single-axis
+      augmentation transfers to unseen *severities* (blur sigma2.0 gains +0.36
+      balanced accuracy having only seen sigma1.0) but only weakly to
+      *compositions*: the single-vs-chain AUC delta was -0.0488 before and
+      -0.0481 after, i.e. unchanged. `chain_heavy` is still the worst view in
+      the grid (0.8627) and binds the worst-case score. Add the chains to
+      `TRAIN_VIEWS_DEFAULT` and re-run — but hold at least one chain out, or
+      the result is uninterpretable for the same reason the severity holdout
+      exists.
 - [ ] Cross-generator evaluation using `--holdout-generators`. NOTE: val will
       mix seen and unseen generators, so a single val AUC does not isolate
       unseen-generator performance. The eval step must filter val to the
