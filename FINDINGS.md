@@ -709,6 +709,78 @@ better race entrant than our current `huge`.
 
 ---
 
+## 2h. PRODUCTION FAILURE: unseen REAL domains are confidently called AI (2026-08-30)
+
+Found from a live Chrome extension running the shipping head over r/itookapicture,
+where many real photographs scored > 0.50. That is not a threshold problem and it
+is not noise. Broken down by real-image SOURCE on ood-s4000, clean view:
+
+```
+real source          n     FPR@0.5   FPR@0.99   mean P(AIGC)
+Real (ImageNet)   1890       0.037      0.001         0.065
+WhichFaceIsReal    110       1.000      1.000         1.000   <== every single one
+val (ImageNet)    1000       0.013      0.000         0.026
+demo-val (COCO)   1000       0.006      0.000         0.016
+```
+
+**Every one of the 110 human-portrait photographs is classified AI-generated with
+probability 1.000.** Not borderline -- saturated. That single subpopulation is
+5.5% of ood's reals and accounts for essentially the whole 8.9% aggregate FPR;
+the ImageNet-like reals sit at a healthy 3.7%.
+
+### Why threshold tuning cannot fix it
+
+Pooled over clean + CDN-like degradations (jpeg q70, resize 0.5x, chain_light):
+
+```
+threshold  0.50   0.70   0.90   0.95   0.99
+FPR       0.153  0.114  0.077  0.065  0.058
+TPR       0.955  0.933  0.885  0.849  0.746
+```
+
+FPR floors out near 6% no matter how high the threshold goes, because the
+failures are at probability 1.0. Reaching 5% FPR needs threshold 0.9998, which
+drops TPR to 0.362.
+
+### Mechanism
+
+The training pool's REAL half is ImageNet photos, and nothing else. Any real
+image from a domain absent there is mapped confidently into AI territory. Human
+portraits are the demonstrated case; the r/itookapicture report suggests
+artistic/enthusiast photography is another.
+
+Two secondary, weaker effects were also measured among true reals (n=700,
+ood clean): P(AIGC) rises as images get **smoother** (edge-energy rho=-0.215,
+p=9e-9) and **more saturated** (rho=+0.130, p=6e-4). Both describe processed
+photography -- shallow depth of field, denoised raws, colour grading -- and
+Reddit's CDN resize/re-encode pushes further the same way. Resolution
+(rho=-0.049) and background texture (rho=-0.016) were NOT significant, so the
+SID_Set-style composition shortcut is not what is happening here.
+
+Effect sizes for those two are modest. The dominant term is plain domain
+coverage of the REAL class, not any single image statistic.
+
+### What this invalidates about our own reporting
+
+**Aggregate AUC completely masked a 100% failure on a real subpopulation.**
+ood AUC is 0.9532 and the per-generator table looked healthy, because that table
+breaks down the AIGC half by generator and treats reals as one undifferentiated
+pool. Any future eval must report **FPR per real source**, not just per
+generator.
+
+### Actions
+
+1. **Expand the REAL corpus by domain, not by count.** Portraits/faces (from a
+   source that is NOT WhichFaceIsReal, which must stay held out as the detector
+   for this bug), artistic/enthusiast photography, phone snapshots, screenshots.
+   This outranks every remaining modelling change.
+2. **Do not ship a binary verdict.** Emit the score with an explicit uncertain
+   band; a confident-wrong label is worse than an abstention.
+3. `data/train_ext/` helps only slightly here -- it adds AIGC-bench "Real",
+   which is still ImageNet-like. It does not close the portrait gap.
+
+---
+
 ## 3. What was built
 
 ### Wave 1
