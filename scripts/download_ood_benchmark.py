@@ -216,6 +216,8 @@ def download_ood_benchmark(
         raw_label = ex["label"]
         norm_label = label_map[int(raw_label)]
         generator = gen_of(ex)
+        if only_generators is not None and generator not in only_generators:
+            continue
 
         if norm_label == LABEL_REAL:
             if real_kept >= real_cap:
