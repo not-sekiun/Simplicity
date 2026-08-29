@@ -14,9 +14,9 @@ Subcommands:
     download-demo coco-val2017       Download the self-reported demo-val "real" half.
     download-demo wildfake-dalle-advanced
                                       Index the demo-val "AIGC" half (manual fetch required
-                                      first — see scripts/download_demo_val.py docstring).
+                                      first - see scripts/download_demo_val.py docstring).
     build-demo-val                   Merge demo-val indexes into data/demo_val/demo_val.csv.
-                                      NEVER used for training — see 5.4 in the brief.
+                                      NEVER used for training - see 5.4 in the brief.
     audit-data [--sample N] [--transform]
                                       Shortcut audit of data/raw/*_index.csv: per-source
                                       stats + a blind-probe canary for label shortcuts
@@ -24,10 +24,11 @@ Subcommands:
                                       build_eval_transform() tensors instead of raw images.
     list-backbones                   List registered frozen-backbone keys (see
                                       src/aigc_detect/backbones.py).
-    embed --backbone KEY --manifest {train,val} [--force] [--limit N]
+    embed --backbone KEY --manifest {train,val,demo-val} [--force] [--limit N]
                                       Precompute + cache pooled embeddings for a manifest
                                       under data/embeddings/. Implements the "Simplicity
                                       Prevails" (arXiv:2602.01738) preprocessing recipe.
+                                      demo-val is EVALUATION ONLY (see 5.4).
     train-head --backbone KEY [--head linear|mlp] [--epochs E] [--lr LR]
                [--batch-size B]
                                       Train a classifier head on cached embeddings for
@@ -182,9 +183,13 @@ def cmd_list_backbones(_args):
 def cmd_embed(args):
     from aigc_detect.embed import precompute_embeddings
 
-    manifest = TRAIN_MANIFEST if args.manifest == "train" else VAL_MANIFEST
+    # demo-val is embeddable for EVALUATION ONLY (brief 5.4 forbids training on
+    # it). train_head never looks at it -- it hardcodes TRAIN_MANIFEST/VAL_MANIFEST.
+    manifests = {"train": TRAIN_MANIFEST, "val": VAL_MANIFEST, "demo-val": DEMO_VAL_MANIFEST}
+    manifest = manifests[args.manifest]
     if not manifest.exists():
-        print(f"No {args.manifest} manifest at {manifest}. Run `main.py split` first.")
+        hint = "build-demo-val" if args.manifest == "demo-val" else "split"
+        print(f"No {args.manifest} manifest at {manifest}. Run `main.py {hint}` first.")
         sys.exit(1)
 
     precompute_embeddings(
@@ -247,7 +252,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_preview.set_defaults(func=cmd_preview_augment)
 
     p_download_demo = sub.add_parser(
-        "download-demo", help="Fetch the self-reported demo-val set (5.4) — never used for training."
+        "download-demo", help="Fetch the self-reported demo-val set (5.4) - never used for training."
     )
     ddsub = p_download_demo.add_subparsers(dest="which", required=True)
     ddsub.add_parser("coco-val2017")
@@ -278,7 +283,7 @@ def build_parser() -> argparse.ArgumentParser:
         "embed", help='Precompute + cache pooled embeddings for a manifest under data/embeddings/.'
     )
     p_embed.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
-    p_embed.add_argument("--manifest", required=True, choices=["train", "val"])
+    p_embed.add_argument("--manifest", required=True, choices=["train", "val", "demo-val"])
     p_embed.add_argument("--batch-size", type=int, default=64)
     p_embed.add_argument("--num-workers", type=int, default=4)
     p_embed.add_argument("--force", action="store_true", help="Recompute even if the cached .npz already exists.")

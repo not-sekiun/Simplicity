@@ -141,7 +141,7 @@ Then re-run: uv run main.py download-demo wildfake-dalle-advanced
 
     records = [(str(p.resolve()), LABEL_AIGC) for p in images]
     print(f"[wildfake_dalle_advanced] indexed {len(records)} images "
-          f"(brief cites 8843 for the full 'DALL·E Advanced' subset).")
+          f"(brief cites 8843 for the full 'DALL-E Advanced' subset).")
     return _write_index("wildfake_dalle_advanced", records)
 
 
