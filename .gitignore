@@ -37,3 +37,7 @@ Thumbs.db
 
 # Local Claude Code session state
 .claude/
+
+# OOD evaluation tier (downloaded, evaluation only)
+data/ood/**
+!data/ood/.gitkeep

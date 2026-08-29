@@ -49,7 +49,7 @@ import numpy as np
 import torch
 from sklearn.metrics import balanced_accuracy_score, roc_auc_score, roc_curve
 
-from aigc_detect.config import RANDOM_SEED, ROOT_DIR
+from aigc_detect.config import GENERATOR_FAMILY, RANDOM_SEED, ROOT_DIR, TRAIN_GENERATORS
 from aigc_detect.embed import fingerprint_paths
 from aigc_detect.embed_views import cache_stem, select_rows, view_embeddings_path, view_fingerprint
 from aigc_detect.heads import build_head
@@ -112,6 +112,7 @@ def evaluate_grid(
     limit: int | None = None,
     sample_rows: int | None = None,
     sample_seed: int = RANDOM_SEED,
+    by_generator: bool = False,
     out_csv: str | Path | None = None,
 ) -> dict:
     manifest_path, head_path = Path(manifest_path), Path(head_path)
@@ -150,7 +151,7 @@ def evaluate_grid(
     specs = {n: all_specs[n] for n in eval_view_names()}
     chains = set(chain_view_names())
 
-    rows, missing, ref_labels = [], [], None
+    rows, missing, ref_labels, generators = [], [], None, None
     for name, spec in specs.items():
         path = view_embeddings_path(backbone_key, stem, name)
         if not path.exists():
@@ -169,6 +170,8 @@ def evaluate_grid(
                 )
             emb = d["embeddings"].astype(np.float32)
             labels = d["labels"].astype(np.int64)
+            if generators is None and "generators" in d:
+                generators = d["generators"].astype(str)
 
         if ref_labels is None:
             ref_labels = labels
@@ -277,6 +280,44 @@ def evaluate_grid(
             print("this as robustness. It means some degradation in the chain is moving inputs")
             print("TOWARD the training domain -- check whether the clean view is the outlier")
             print("(out-of-distribution resolution or compression) rather than the chains.")
+
+    if by_generator and generators is not None and any(g for g in generators):
+        # Per-generator AUC = that generator's fakes vs ALL reals in the set.
+        # Reported for the clean view and for the pooled degraded views, split
+        # by architecture family and by seen/unseen.
+        #
+        # Two axes, deliberately not collapsed into one: family answers "is this
+        # generator in scope for the competition" (expected to be diffusion),
+        # seen/unseen answers "is this generalization". BigGAN is a GAN we
+        # trained on; SD14/SDXL/DALLE2 are diffusion models we did not.
+        real_mask = clean["labels"] == 0
+        print("\nper-generator AUC (that generator's fakes vs ALL reals):")
+        print(f"  {'generator':<18} {'family':<10} {'seen?':<8} {'n':>5} {'clean':>8} {'degraded':>9}")
+        print("  " + "-" * 62)
+        fam_rows: dict[str, list] = {}
+        for gen in sorted(set(generators)):
+            if not gen or GENERATOR_FAMILY.get(gen) == "real":
+                continue
+            gmask = (generators == gen) & (clean["labels"] == 1)
+            n = int(gmask.sum())
+            if n < 10:
+                continue
+            sel = gmask | real_mask
+            y = clean["labels"][sel]
+            a_clean = float(roc_auc_score(y, clean["probs"][sel]))
+            deg_p = np.concatenate([r["probs"][sel] for r in degraded])
+            deg_y = np.concatenate([y for _ in degraded])
+            a_deg = float(roc_auc_score(deg_y, deg_p))
+            fam = GENERATOR_FAMILY.get(gen, "unknown")
+            seen = "trained" if gen in TRAIN_GENERATORS else "UNSEEN"
+            print(f"  {gen:<18} {fam:<10} {seen:<8} {n:>5} {a_clean:>8.4f} {a_deg:>9.4f}")
+            fam_rows.setdefault(fam, []).append((a_clean, a_deg))
+        print("  " + "-" * 62)
+        for fam in sorted(fam_rows):
+            cl = float(np.mean([x[0] for x in fam_rows[fam]]))
+            dg = float(np.mean([x[1] for x in fam_rows[fam]]))
+            note = "  <- in scope" if fam == "diffusion" else ("  <- out of scope, do not tune on this" if fam == "gan" else "")
+            print(f"  {'MEAN ' + fam:<18} {'':<10} {'':<8} {'':>5} {cl:>8.4f} {dg:>9.4f}{note}")
 
     if out_csv is None:
         out_csv = ROOT_DIR / "reports" / f"grid__{backbone_key}__{stem}__{head_path.stem}.csv"

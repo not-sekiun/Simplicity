@@ -88,6 +88,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from aigc_detect.config import (  # noqa: E402
+    OOD_DIR,
+    OOD_MANIFEST,
     ROOT_DIR,
     DEMO_VAL_DIR,
     DEMO_VAL_MANIFEST,
@@ -192,6 +194,24 @@ def cmd_build_demo_val(_args):
     build_demo_val_main()
 
 
+def cmd_download_ood(args):
+    from scripts.download_ood_benchmark import download_ood_benchmark
+
+    download_ood_benchmark(
+        per_generator=args.per_generator,
+        max_scan=args.max_scan,
+        min_scan=args.min_scan,
+        seed=args.seed,
+        force=args.force,
+    )
+
+
+def cmd_build_ood(_args):
+    from scripts.make_ood import main as build_ood_main
+
+    build_ood_main()
+
+
 def cmd_build_heldout(_args):
     from scripts.make_heldout import main as build_heldout_main
 
@@ -255,10 +275,12 @@ def _resolve_manifest(name: str):
         "val": VAL_MANIFEST,
         "heldout": HELDOUT_MANIFEST,
         "demo-val": DEMO_VAL_MANIFEST,
+        "ood": OOD_MANIFEST,
     }
     manifest = manifests[name]
     if not manifest.exists():
-        hint = {"demo-val": "build-demo-val", "heldout": "build-heldout"}.get(name, "split")
+        hint = {"demo-val": "build-demo-val", "heldout": "build-heldout",
+                "ood": "download-ood` then `main.py build-ood"}.get(name, "split")
         print(f"No {name} manifest at {manifest}. Run `main.py {hint}` first.")
         sys.exit(1)
     return manifest
@@ -340,6 +362,7 @@ def cmd_eval_grid(args):
         limit=args.limit,
         sample_rows=args.sample_rows,
         sample_seed=args.sample_seed,
+        by_generator=args.by_generator,
         out_csv=args.out,
     )
 
@@ -438,6 +461,21 @@ def build_parser() -> argparse.ArgumentParser:
         "build-demo-val", help="Merge demo-val indexes into data/demo_val/demo_val.csv (no split)."
     ).set_defaults(func=cmd_build_demo_val)
 
+    p_dl_ood = sub.add_parser(
+        "download-ood",
+        help="Stream a capped, generator-balanced slice of AIGC-Detection-Benchmark into data/ood/.",
+    )
+    p_dl_ood.add_argument("--per-generator", type=int, default=250)
+    p_dl_ood.add_argument("--max-scan", type=int, default=60_000)
+    p_dl_ood.add_argument("--min-scan", type=int, default=15_000)
+    p_dl_ood.add_argument("--seed", type=int, default=RANDOM_SEED)
+    p_dl_ood.add_argument("--force", action="store_true")
+    p_dl_ood.set_defaults(func=cmd_download_ood)
+
+    sub.add_parser(
+        "build-ood", help="Merge data/ood/*_index.csv into data/ood/ood.csv (evaluation only)."
+    ).set_defaults(func=cmd_build_ood)
+
     sub.add_parser(
         "build-heldout", help="Merge data/heldout/*_index.csv into data/heldout/heldout.csv (no split)."
     ).set_defaults(func=cmd_build_heldout)
@@ -462,7 +500,7 @@ def build_parser() -> argparse.ArgumentParser:
         "embed", help='Precompute + cache pooled embeddings for a manifest under data/embeddings/.'
     )
     p_embed.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
-    p_embed.add_argument("--manifest", required=True, choices=["train", "val", "heldout", "demo-val"])
+    p_embed.add_argument("--manifest", required=True, choices=["train", "val", "heldout", "demo-val", "ood"])
     p_embed.add_argument("--batch-size", type=int, default=64)
     p_embed.add_argument("--num-workers", type=int, default=4)
     p_embed.add_argument("--force", action="store_true", help="Recompute even if the cached .npz already exists.")
@@ -476,7 +514,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Precompute cached embeddings for every robustness view (5.2 table) of a manifest.",
     )
     p_embed_views.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
-    p_embed_views.add_argument("--manifest", required=True, choices=["train", "val", "heldout", "demo-val"])
+    p_embed_views.add_argument("--manifest", required=True, choices=["train", "val", "heldout", "demo-val", "ood"])
     p_embed_views.add_argument(
         "--views", nargs="+", default=None, metavar="VIEW",
         help="Only compute these views (default: all 18). E.g. --views clean blur_sigma2.0 chain_heavy",
@@ -534,7 +572,7 @@ def build_parser() -> argparse.ArgumentParser:
         "eval-grid", help="Score a trained head across every cached robustness view (5.5.4)."
     )
     p_eval_grid.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
-    p_eval_grid.add_argument("--manifest", required=True, choices=["train", "val", "heldout", "demo-val"])
+    p_eval_grid.add_argument("--manifest", required=True, choices=["train", "val", "heldout", "demo-val", "ood"])
     p_eval_grid.add_argument("--head", default=None, help="Head checkpoint (default: models/<backbone>__<kind>.pt).")
     p_eval_grid.add_argument("--head-kind", default="linear", choices=["linear", "mlp"],
                              help="Only used to locate the default checkpoint path.")
@@ -542,6 +580,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval_grid.add_argument("--sample-rows", type=int, default=None,
                              help="Match the --sample-rows used for embed-views.")
     p_eval_grid.add_argument("--sample-seed", type=int, default=RANDOM_SEED)
+    p_eval_grid.add_argument(
+        "--by-generator", action="store_true",
+        help="Break AUC down per generator, grouped by architecture family (diffusion vs GAN) "
+             "and by trained/UNSEEN. Needs a manifest with a generator column.",
+    )
     p_eval_grid.add_argument("--out", default=None, help="Per-view CSV path (default: reports/grid__*.csv).")
     p_eval_grid.set_defaults(func=cmd_eval_grid)
 
