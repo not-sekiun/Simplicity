@@ -50,6 +50,26 @@ from aigc_detect.config import (  # noqa: E402
 EXT_INDEX = DATA_DIR / "train_ext" / "train_ext_index.csv"
 OUT_MANIFEST = PROCESSED_DIR / "train_ext.csv"
 
+# Generators the slice CONTAINS but which are deliberately excluded from
+# training, so they survive as unseen-generator evaluation cells.
+#
+# Without this, training on the whole slice takes the OOD tier from 9 unseen
+# generator cells to 1 -- and from three in-scope unseen DIFFUSION cells
+# (DALLE2, SD14, SDXL) to zero. The OOD score would rise and we would have no
+# way to tell genuine generalization from "we now train on what we test": the
+# same trap as training on data/ood, one step removed.
+#
+# DALLE2 and SDXL are held back specifically because they are in-scope
+# diffusion, and DALLE2 is the single worst cell in the entire grid (clean
+# 0.9278 -> degraded 0.8020). If generator diversity genuinely transfers, these
+# two must improve WITHOUT having been trained on -- which is the only evidence
+# that says anything about the competition's unknown generators.
+#
+# Costs six generators' worth of training signal instead of eight. Worth it: a
+# benchmark that cannot discriminate is worse than none, because it yields
+# confident wrong conclusions.
+HOLDOUT_GENERATORS = ("DALLE2", "SDXL")
+
 
 def main() -> Path:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -58,6 +78,9 @@ def main() -> Path:
                          "quota was sized for 16 fake generators but only 9 are kept, so the slice "
                          "is real-heavy on its own.")
     ap.add_argument("--seed", type=int, default=RANDOM_SEED)
+    ap.add_argument("--no-holdout", action="store_true",
+                    help="Include HOLDOUT_GENERATORS in training too. This destroys the "
+                         "unseen-generator evaluation; only pass it if you have a replacement.")
     a = ap.parse_args()
 
     if not EXT_INDEX.exists():
@@ -65,6 +88,13 @@ def main() -> Path:
 
     base = pd.read_csv(TRAIN_MANIFEST)
     ext = pd.read_csv(EXT_INDEX)
+
+    if not a.no_holdout:
+        held = ext[ext["generator"].isin(HOLDOUT_GENERATORS)]
+        ext = ext[~ext["generator"].isin(HOLDOUT_GENERATORS)]
+        print(f"[train-ext] HELD OUT of training: {list(HOLDOUT_GENERATORS)} "
+              f"({len(held):,} rows) -- they stay unseen so the OOD tier keeps "
+              f"in-scope unseen-diffusion cells to measure with.")
     print(f"[train-ext] base train.csv : {len(base):,} rows, {base['generator'].nunique()} generators")
     print(f"[train-ext] new slice      : {len(ext):,} rows, {ext['generator'].nunique()} generators "
           f"{dict(sorted(ext['generator'].value_counts().items()))}")

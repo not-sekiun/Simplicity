@@ -61,7 +61,96 @@ backbone-race spread.
 because the curve is monotone and the mechanism is obvious; do NOT use `ood`
 to pick a real hyper-parameter.)
 
-### Job 1 (running): full-pool embedding
+### RESULT: the full-pool retrain landed at +0.0041, not the +0.015-0.025 predicted
+
+`models/pe-core-l__linear__fullpool.pt`, trained on all 23,800 images x 11 views
+= 261,800 rows (vs the shipping head's 6,000 images).
+
+| | 6k baseline | full pool 23.8k | delta |
+|---|---|---|---|
+| **ood score** | 0.9366 | **0.9407** | **+0.0041** |
+| ood AUC_clean | 0.9532 | 0.9624 | +0.0092 |
+| ood AUC_robust (pooled) | 0.9200 | 0.9191 | -0.0009 |
+| ood worst (`chain_heavy`) | 0.8099 | 0.8050 | -0.0049 |
+| val score | 0.9886 | 0.9870 | -0.0016 |
+
+**The prediction was wrong and the method is the lesson.** +0.015-0.025 was
+extrapolated from a 4-point learning curve (3k->6k bought +0.022). The curve had
+flattened further out than its visible points implied: a 4x data increase bought
+a fifth of what a 2x increase had. Do not put a range on an extrapolation from
+four points -- "direction certain, magnitude unknown" was the honest claim.
+
+Two things the breakdown shows:
+
+- **Clean improved, robustness did not** (+0.0092 clean, -0.0009 robust, -0.0049
+  worst). More of the SAME distribution sharpens clean discrimination and buys
+  no robustness.
+- **The portrait bug is completely unmoved.** `WhichFaceIsReal` FPR was 1.000
+  before and is 1.000 after. 4x more ImageNet-derived reals does nothing for a
+  domain that is not ImageNet. Strongest confirmation yet of FINDINGS 2h.
+
+2 epochs is fine; a 1-epoch run scored 0.9404 vs 0.9407, so the epoch-2 dip in
+the val log does not carry to ood.
+
+**Volume of the same distribution is an exhausted lever.** The two live ones are
+generator diversity (untested) and real-domain coverage (untouched).
+
+### train_ext HOLDS OUT DALLE2 and SDXL -- do not remove that without a replacement
+
+Training on the whole slice would have taken the OOD tier from 9 unseen
+generator cells to 1, and from three in-scope unseen DIFFUSION cells to **zero**:
+
+```
+unseen now (9):   CycleGAN DALLE2 GauGAN ProGAN SD14 SDXL StarGAN StyleGAN StyleGAN2
+if all trained:   ProGAN only -- a GAN, out of scope. No diffusion left.
+as shipped (3):   DALLE2, ProGAN, SDXL  -> in-scope diffusion preserved: DALLE2, SDXL
+```
+
+The score would have risen with no way to separate generalization from "we now
+train on what we test" -- the data/ood trap, one step removed.
+`HOLDOUT_GENERATORS` in `scripts/make_train_ext.py` keeps DALLE2 and SDXL
+unseen. DALLE2 is the worst cell in the whole grid (clean 0.9278 -> degraded
+0.8020), so if generator diversity transfers, **DALLE2 and SDXL must improve
+WITHOUT being trained on.** That is the only result that says anything about the
+competition's unknown generators. `--no-holdout` exists but destroys this.
+
+Current `train_ext.csv`: 30,919 rows, 14 generators (6 new: CycleGAN, GauGAN,
+SD14, StarGAN, StyleGAN, StyleGAN2), 17,078 real / 13,841 fake.
+
+### Multi-machine: repo is on GitHub (private)
+
+https://github.com/not-sekiun/tiktoktechjam2026 -- clone to EXACTLY the path in
+`worker.py`'s `CANONICAL_ROOT`. `fingerprint_paths` hashes the manifests'
+absolute path strings, so a different root makes every cache computed there
+STALE on arrival. `scripts/worker.py --check` verifies path + data before any
+GPU time is committed; `--job embed:train-ext` embeds only the 11 training views
+rather than the default 22 (the other 11 are held-out EVAL views, never
+evaluated on a train manifest -- the primary machine's full-pool run paid that
+2x cost, secondary machines should not).
+
+Manifests are committed to git as the reproducibility contract; images are not.
+Copy `data/raw/tiny_genimage` (2.4 GB) and `data/train_ext` (545 MB), or re-pull
+them -- the downloads are deterministic and land at identical paths.
+
+### Process hazards hit twice this session, both silent
+
+1. **`str.replace` on source silently no-ops when the anchor has moved.** The
+   `only_generators` filter was declared, documented, and PRINTED ("keeping only
+   generators: [...]") while never filtering, because its insertion anchored on
+   a line an earlier audit had deleted. Use an anchored Edit, which fails loudly.
+   Never accept a log line as evidence that the behaviour it describes ran.
+2. **`nohup` inside a backgrounded call survives TaskStop.** The first train_ext
+   pull kept running after being "stopped" and wrote contaminating generators
+   alongside the fixed pull for ~20 minutes. Do not use `nohup` when the harness
+   already backgrounds; verify the process is gone by PID.
+
+Both were caught only by inspecting state rather than trusting a status line.
+`data/train_ext/` was twice contaminated with `WhichFaceIsReal` -- the canary for
+the FPR bug. Had it reached training, that detector would have gone green while
+the bug remained.
+
+
+### Job 1 (COMPLETE): full-pool embedding
 
 `embed-views --backbone pe-core-l --manifest train --train-chains` with no
 `--sample-rows`, so stem `train`, 23,800 rows x 22 views = 523,600 forwards,
@@ -74,7 +163,7 @@ uv run main.py train-head-views --backbone pe-core-l --with-chains     --val-sam
 `ood-s4000` and compare to **0.9366**. If it wins, this becomes the shipping
 head and `predict.py`'s default should be repointed.
 
-### Job 2 (running): disjoint generator-diverse training slice
+### Job 2 (COMPLETE): disjoint generator-diverse training slice
 
 `data/train_ext/` -- a TRAINING slice from the same HF dataset as the eval
 tier, kept **provably disjoint by construction**: streaming order is
@@ -146,12 +235,22 @@ judged that acceptable, but confirm before shipping it if it ever wins.
 
 ### Revised priority order
 
-| # | Work | Cost | Expected value |
+| # | Work | Cost | Status / expected value |
 |---|---|---|---|
-| 1 | Full-pool retrain (job 1) | running | +0.015-0.025, direction certain |
-| 2 | Deliverable 5.5.5 error analysis | ~1h, CPU | required, still not started |
-| 3 | Union manifest with `data/train_ext/` | ~1h embed | potentially largest; 9 new generators |
-| 4 | metaclip2-giant | micro-batching + ~5h | prior says it loses by ~0.02 |
+| 1 | Full-pool retrain | done | **+0.0041** (predicted +0.015-0.025; see above) |
+| 2 | Deliverable 5.5.5 error analysis | done | `main.py error-analysis`, verified |
+| 3 | **Real-domain corpus (FFHQ / photography)** | not started | **only thing that fixes FPR 1.000. Highest value.** |
+| 4 | Train on `train_ext` (6 new generators) | manifest built, embed pending | unknown; judge on held-out DALLE2 + SDXL |
+| 5 | metaclip2-giant | micro-batching + ~5h | prior says it loses by ~0.02 |
+
+**On (3):** FFHQ is the field-standard real-face source, but **WhichFaceIsReal's
+real half IS FFHQ** -- training on it puts the canary's images into training and
+the detector goes green while the bug remains. Train on a different face source
+(CelebA-HQ), or hold out an explicit FFHQ row range. Unsplash Lite (25k
+professional photos, 2048-4280px) is the closest available proxy for the
+r/itookapicture domain, but ships URLs only, not images. Low-resolution face
+sets (e.g. ffhq128) are actively harmful here: upscaled to 336 they are blurry,
+and we measured that smoother -> more AI-looking.
 
 
 Read order: this file, then `NARRATIVE.md`'s "Comparability epochs" table
