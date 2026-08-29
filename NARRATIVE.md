@@ -381,9 +381,43 @@ no longer the worst cell in the grid, and the worst-case score — the
 adversarial number, what someone who gets to pick the transform achieves —
 improves **0.9306 -> 0.9580**.
 
-The binding constraint moved to `noise_sigma0.1` (0.9179), a held-out
-severity. Heavy sensor noise is now the weakest axis; that is the next thing
-to attack, not composition.
+#### CORRECTION (2026-08-29): these numbers predate seeding, and one claim was wrong
+
+`train_head_on_views` was **unseeded** until commit `53426ac` — head init and
+DataLoader shuffle varied run to run. Three repeat runs of this exact
+configuration gave AUC_robust(pooled) **0.9803 / 0.9797 / 0.9796**, i.e.
+roughly ±0.0005. Every Run 4/5/6 number above is one such draw.
+
+Canonical **seeded** figures for this run (`--seed 42`, now reproducible
+exactly — verified by two identical runs):
+
+| | reported above (unseeded) | **canonical (seeded)** |
+|---|---|---|
+| val AUC_robust (pooled) | 0.9803 | **0.9791** |
+| val score | 0.9892 | **0.9886** |
+| val worst-case score | 0.9580 | **0.9551** |
+| demo-val score | 0.9984 | **0.9983** |
+
+The ±0.0005 does not touch any conclusion here — augmented-vs-clean training
+moved the score by +0.04, eighty times larger. **But one claim was wrong and
+is retracted:**
+
+> ~~"The binding constraint moved to `noise_sigma0.1` (0.9179), a held-out
+> severity. Heavy sensor noise is now the weakest axis, not composition."~~
+
+That rested on `noise_sigma0.1` 0.9179 vs `chain_heavy` 0.9182 — **a gap of
+0.0003, against a per-view standard error of ~0.0065.** The seeded rerun puts
+`chain_heavy` (0.9121) back as the worst view. The two are **statistically
+tied**; which one prints as "worst" flips on the training seed.
+
+The correct statement: **`chain_heavy` and `noise_sigma0.1` are jointly the
+binding constraint at ~0.91–0.92, and this benchmark cannot separate them.**
+Deep composition and heavy sensor noise are both open; neither has been shown
+to dominate.
+
+This is a second, sharper reason for the OOD tier. A benchmark that cannot
+rank its own two worst cells certainly cannot rank two backbones that differ
+by less.
 
 **Full per-view tables for both evaluation sets — all 18 scored views, AUC /
 BAcc@t / BAcc@0.5 / TPR / FPR, with the trained-vs-held-out marking and the
@@ -416,7 +450,13 @@ Competition metric is `0.5*AUC_clean + 0.5*AUC_robust`, pooled.
 | 5 control | clean-only, 6k images | 0.9472 | 0.9631 |
 | 5 control | clean-only, 6k images, 14 epochs | 0.9382 | — |
 | 5 | augmented-view trained | 0.9878 | 0.9978 |
-| **6** | **+ chained views in training** | **0.9892** | **0.9984** |
+| 6 | + chained views in training (unseeded draw) | 0.9892 | 0.9984 |
+| **6** | **+ chains, SEEDED canonical (`--seed 42`)** | **0.9886** | **0.9983** |
+
+All rows above except the last predate seeding and carry ~±0.0005 (three
+repeat runs measured 0.9803 / 0.9797 / 0.9796 pooled on the same config).
+The shipping checkpoint `models/pe-core-l__linear__augchain.pt` is the seeded
+one and reproduces exactly.
 
 Worst-case (`0.5*clean + 0.5*min per-view AUC`), the adversarial reading:
 
@@ -424,7 +464,10 @@ Worst-case (`0.5*clean + 0.5*min per-view AUC`), the adversarial reading:
 |---|---|---|
 | 4 | 0.9126 | `chain_heavy` |
 | 5 | 0.9306 | `chain_heavy` |
-| **6** | **0.9580** | `noise_sigma0.1` |
+| **6 (seeded)** | **0.9551** | `chain_heavy` 0.9121 ~ `noise_sigma0.1` (tied) |
 
-Next: heavy sensor noise is now the weakest axis (0.9179) — attack that, not
-composition. Then the backbone race on `--sample-rows 2000`.
+Next: `chain_heavy` and `noise_sigma0.1` are jointly binding at ~0.91-0.92 and
+this benchmark cannot separate them (see the Run 6 correction). Both deep
+composition and heavy sensor noise remain open. Resolving which matters needs
+an evaluation set with more range -- hence the OOD tier -- not another run
+against val.

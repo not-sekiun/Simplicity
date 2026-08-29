@@ -79,11 +79,66 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from aigc_detect.config import LABEL_AIGC, LABEL_REAL, OOD_DIR, TRAIN_GENERATORS  # noqa: E402
+from aigc_detect.config import (  # noqa: E402
+    GENERATOR_FAMILY,
+    LABEL_AIGC,
+    LABEL_REAL,
+    OOD_DIR,
+    TRAIN_GENERATORS,
+)
 
 OOD_HF_HANDLE = "TheKernel01/AIGC-Detection-Benchmark"
 OOD_INDEX = OOD_DIR / "aigc_detect_bench_index.csv"
 SOURCE_NAME = "aigc_detect_bench"
+
+
+def reindex_from_disk() -> Path:
+    """Rebuild the index CSV from the images already written under data/ood/images/.
+
+    Exists because the streaming download only writes its index after the loop
+    ends, so interrupting it discards every image already saved. That is a bad
+    property for a job that streams for an hour, and it bit us: one generator
+    (ProGAN) turned out to be rarer in the stream than the round-robin pattern
+    suggested, so its quota never filled and the run kept scanning long after
+    every in-scope generator was complete.
+
+    Recovery is exact rather than approximate: the directory name IS the
+    generator, and the label follows from the generator (only Real and
+    WhichFaceIsReal are real sources), so nothing is inferred from the pixels.
+    """
+    root = OOD_DIR / "images"
+    if not root.exists():
+        raise SystemExit(f"No images under {root}. Run `uv run main.py download-ood` first.")
+
+    real_gens = {g for g, fam in GENERATOR_FAMILY.items() if fam == "real"}
+    records: list[tuple[str, int, str]] = []
+    for gen_dir in sorted(root.iterdir()):
+        if not gen_dir.is_dir():
+            continue
+        generator = gen_dir.name
+        if generator not in GENERATOR_FAMILY:
+            print(f"[ood] WARNING: unknown generator dir '{generator}' -- included, family unknown")
+        label = LABEL_REAL if generator in real_gens else LABEL_AIGC
+        for img in sorted(gen_dir.glob("*.jpg")):
+            records.append((str(img.resolve()), label, generator))
+
+    if not records:
+        raise SystemExit(f"No .jpg files found under {root}.")
+
+    OOD_INDEX.parent.mkdir(parents=True, exist_ok=True)
+    with open(OOD_INDEX, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["image_path", "label", "source", "generator"])
+        for image_path, label, generator in records:
+            w.writerow([image_path, label, SOURCE_NAME, generator])
+
+    n_real = sum(1 for _, l, _ in records if l == LABEL_REAL)
+    print(f"[ood] reindexed {len(records):,} images from disk ({n_real} real / {len(records)-n_real} aigc)")
+    print(f"[ood] per-generator: {dict(sorted(Counter(g for _, _, g in records).items()))}")
+    print(f"[ood] UNSEEN generators (absent from data/raw/): "
+          f"{sorted({g for _, _, g in records} - set(TRAIN_GENERATORS))}")
+    print(f"[ood] wrote index -> {OOD_INDEX}")
+    return OOD_INDEX
 
 
 def download_ood_benchmark(
@@ -197,7 +252,12 @@ def main():
                    help="0 (default) disables streaming shuffle -- it blocks until its buffer fills.")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--force", action="store_true", help="Re-encode images already on disk.")
+    p.add_argument("--reindex-only", action="store_true",
+                   help="Skip downloading; rebuild the index CSV from images already on disk.")
     a = p.parse_args()
+    if a.reindex_only:
+        reindex_from_disk()
+        return
     download_ood_benchmark(a.per_generator, a.max_scan, a.min_scan, a.shuffle_buffer, a.seed, a.force)
 
 
