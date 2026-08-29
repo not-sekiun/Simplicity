@@ -41,12 +41,25 @@ Subcommands:
                                       Prevails" (arXiv:2602.01738) preprocessing recipe.
                                       demo-val is EVALUATION ONLY (see 5.4).
     embed-views --backbone KEY --manifest {train,val,heldout,demo-val}
-                [--views V ...] [--force] [--limit N]
-                                      Same, but for all 15 robustness views of the
-                                      5.2 table (clean + 14 degradations). One decode
-                                      per image feeds every view. Caches to
-                                      <backbone>__<manifest>__<view>.npz. This is the
+                [--views V ...] [--force] [--limit N] [--sample-rows N]
+                                      Same, but for all 18 robustness views: clean,
+                                      the 14 single-transform rows of the 5.2 table,
+                                      and 3 chained rows. One decode per image feeds
+                                      every view. Caches to
+                                      <backbone>__<stem>__<view>.npz. This is the
                                       instrument for the AUC_robust half of the score.
+                                      --sample-rows draws a label-balanced,
+                                      source-proportional subsample (seeded, so every
+                                      backbone faces the identical subset) and tags
+                                      the cache stem with it -- the intended path for
+                                      racing backbones cheaply.
+    eval-grid --backbone KEY --manifest {train,val,heldout,demo-val} [--head PATH]
+              [--sample-rows N] [--limit N]
+                                      Score a trained head over every cached view:
+                                      per-view AUC/balanced accuracy at one fixed
+                                      threshold, AUC_robust three ways, the
+                                      robustness gap, and single-vs-chained means.
+                                      Deliverable 5.5.4. No GPU work.
     train-head --backbone KEY [--head linear|mlp] [--epochs E] [--lr LR]
                [--batch-size B]
                                       Train a classifier head on cached embeddings for
@@ -70,6 +83,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from aigc_detect.config import (  # noqa: E402
+    ROOT_DIR,
     DEMO_VAL_DIR,
     DEMO_VAL_MANIFEST,
     HELDOUT_DIR,
@@ -272,7 +286,53 @@ def cmd_embed_views(args):
         num_workers=args.num_workers,
         force=args.force,
         limit=args.limit,
+        sample_rows=args.sample_rows,
+        sample_seed=args.sample_seed,
         dtype=args.dtype,
+    )
+
+
+def cmd_train_head_views(args):
+    from aigc_detect.embed_views import cache_stem
+    from aigc_detect.train_head import TRAIN_VIEWS_DEFAULT, train_head_on_views
+
+    train_stem = cache_stem(TRAIN_MANIFEST, sample_rows=args.train_sample_rows)
+    val_stem = cache_stem(VAL_MANIFEST, sample_rows=args.val_sample_rows)
+    views = tuple(args.train_views) if args.train_views else TRAIN_VIEWS_DEFAULT
+    if args.clean_only:
+        views = ("clean",)
+
+    train_head_on_views(
+        backbone_key=args.backbone,
+        train_stem=train_stem,
+        val_stem=val_stem,
+        train_views=views,
+        head_kind=args.head,
+        epochs=args.epochs,
+        lr=args.lr,
+        batch_size=args.batch_size,
+        weight_decay=args.weight_decay,
+        out_path=args.out,
+    )
+
+
+def cmd_eval_grid(args):
+    from aigc_detect.eval_grid import evaluate_grid
+
+    manifest = _resolve_manifest(args.manifest)
+    head_path = Path(args.head) if args.head else ROOT_DIR / "models" / f"{args.backbone}__{args.head_kind}.pt"
+    if not head_path.exists():
+        print(f"No head checkpoint at {head_path}. Run `main.py train-head --backbone {args.backbone}` first.")
+        sys.exit(1)
+
+    evaluate_grid(
+        backbone_key=args.backbone,
+        manifest_path=manifest,
+        head_path=head_path,
+        limit=args.limit,
+        sample_rows=args.sample_rows,
+        sample_seed=args.sample_seed,
+        out_csv=args.out,
     )
 
 
@@ -394,7 +454,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_embed_views.add_argument("--manifest", required=True, choices=["train", "val", "heldout", "demo-val"])
     p_embed_views.add_argument(
         "--views", nargs="+", default=None, metavar="VIEW",
-        help="Only compute these views (default: all 15). E.g. --views clean blur_sigma2.0",
+        help="Only compute these views (default: all 18). E.g. --views clean blur_sigma2.0 chain_heavy",
     )
     p_embed_views.add_argument(
         "--batch-size", type=int, default=8,
@@ -402,9 +462,55 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_embed_views.add_argument("--num-workers", type=int, default=4)
     p_embed_views.add_argument("--force", action="store_true", help="Recompute even if a current cache exists.")
-    p_embed_views.add_argument("--limit", type=int, default=None, help="Only embed the first N rows.")
+    p_embed_views.add_argument(
+        "--limit", type=int, default=None,
+        help="Only embed the first N rows. Prefer --sample-rows: a manifest prefix is not label-balanced.",
+    )
+    p_embed_views.add_argument(
+        "--sample-rows", type=int, default=None, metavar="N",
+        help="Embed a label-balanced, source-proportional subsample of N rows (seeded). "
+             "Caches under a '-sN' stem so it coexists with the full run.",
+    )
+    p_embed_views.add_argument("--sample-seed", type=int, default=RANDOM_SEED)
     p_embed_views.add_argument("--dtype", default="float16", choices=["float16", "float32"])
     p_embed_views.set_defaults(func=cmd_embed_views)
+
+    p_thv = sub.add_parser(
+        "train-head-views",
+        help="Train a head on cached CLEAN + DEGRADED embeddings (the augmentation ablation).",
+    )
+    p_thv.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
+    p_thv.add_argument("--train-sample-rows", type=int, default=None,
+                       help="Match the --sample-rows used for `embed-views --manifest train`.")
+    p_thv.add_argument("--val-sample-rows", type=int, default=None,
+                       help="Match the --sample-rows used for `embed-views --manifest val`.")
+    p_thv.add_argument("--train-views", nargs="+", default=None, metavar="VIEW",
+                       help="Views to TRAIN on (default: one severity per family; the rest, "
+                            "including all chains, stay held out and are only evaluated).")
+    p_thv.add_argument("--clean-only", action="store_true",
+                       help="Control arm: train on the clean view alone, same images, same scaler.")
+    p_thv.add_argument("--head", default="linear", choices=["linear", "mlp"])
+    p_thv.add_argument("--epochs", type=int, default=2)
+    p_thv.add_argument("--lr", type=float, default=1e-3)
+    p_thv.add_argument("--batch-size", type=int, default=128)
+    p_thv.add_argument("--weight-decay", type=float, default=0.0)
+    p_thv.add_argument("--out", default=None, help="Checkpoint path (default: models/<backbone>__<kind>__<tag>.pt).")
+    p_thv.set_defaults(func=cmd_train_head_views)
+
+    p_eval_grid = sub.add_parser(
+        "eval-grid", help="Score a trained head across every cached robustness view (5.5.4)."
+    )
+    p_eval_grid.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
+    p_eval_grid.add_argument("--manifest", required=True, choices=["train", "val", "heldout", "demo-val"])
+    p_eval_grid.add_argument("--head", default=None, help="Head checkpoint (default: models/<backbone>__<kind>.pt).")
+    p_eval_grid.add_argument("--head-kind", default="linear", choices=["linear", "mlp"],
+                             help="Only used to locate the default checkpoint path.")
+    p_eval_grid.add_argument("--limit", type=int, default=None, help="Match the --limit used for embed-views.")
+    p_eval_grid.add_argument("--sample-rows", type=int, default=None,
+                             help="Match the --sample-rows used for embed-views.")
+    p_eval_grid.add_argument("--sample-seed", type=int, default=RANDOM_SEED)
+    p_eval_grid.add_argument("--out", default=None, help="Per-view CSV path (default: reports/grid__*.csv).")
+    p_eval_grid.set_defaults(func=cmd_eval_grid)
 
     p_train_head = sub.add_parser(
         "train-head", help="Train a classifier head on cached embeddings (run `embed` for train+val first)."

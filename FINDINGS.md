@@ -352,6 +352,84 @@ against a ~0.65 shortcut floor is the number with content.
 
 ---
 
+## 2e. First valid robustness grid (2026-08-29) — half the score, measured
+
+`models/pe-core-l__linear.pt` over all 18 views of a seeded, label-balanced
+2,000-row val subsample (`reports/grid__pe-core-l__val-s2000__*.csv`). This is
+the **first grid run that is valid at all** — traps 8, 9, 10, 12, 13, 15 all
+had to be fixed first.
+
+```
+AUC_clean                    0.9997
+AUC_robust  pooled           0.8779   ->  0.5*clean+0.5*robust = 0.9388
+            mean             0.9526   ->                         0.9762
+            worst            0.8454   ->                         0.9226   (chain_heavy)
+robustness gap  AUC          0.0471
+                BAcc@t       0.2093
+```
+
+**The choice of AUC_robust definition moves the headline score by 5.4 points**
+(0.9226 to 0.9762) on identical predictions. Report all three; primary is
+pooled. The pooled-vs-mean spread (0.8779 vs 0.9526) is itself the diagnostic:
+each view is internally well-ranked, but the score *scales* drift hard between
+views, which only pooled sees.
+
+### The failure is calibration, not signal — and it points two ways
+
+| view | AUC | BAcc@t | TPR | FPR |
+|---|---|---|---|---|
+| clean | 0.9997 | 0.9915 | 0.990 | 0.007 |
+| jpeg_q50 | 0.9970 | 0.8650 | **0.730** | 0.000 |
+| jpeg_q30 | 0.9934 | 0.8690 | **0.740** | 0.002 |
+| blur_sigma1.0 | 0.9368 | **0.5230** | 1.000 | **0.954** |
+| blur_sigma2.0 | 0.8503 | **0.5070** | 0.999 | **0.985** |
+| resize_0.5x | 0.9637 | **0.5310** | 1.000 | **0.938** |
+| resize_0.25x | 0.8982 | **0.5170** | 0.999 | **0.965** |
+| noise_sigma0.1 | 0.8840 | 0.6165 | 0.995 | 0.762 |
+| chain_heavy | 0.8454 | 0.7740 | 0.821 | 0.273 |
+
+Blur and resize collapse balanced accuracy to **chance** (0.507-0.531) while
+their AUC stays 0.85-0.96. Ranking survives almost intact; the decision
+boundary does not. Concretely, **FPR goes to 0.94-0.99: the model calls
+essentially every blurred or downscaled REAL photo AIGC.** The plain reading
+is that it learned "smooth / low-frequency -> generated" — reasonable on
+256px Tiny-GenImage, where the AI half really is smoother — so removing high
+frequencies from a real photo makes it look generated.
+
+JPEG fails in the **opposite direction**: TPR drops to 0.73 with FPR pinned at
+0.000, i.e. re-compressed AIGC images get called real. Its AUC barely moves
+(0.9934 at q30).
+
+**No single threshold can fix both.** This is the measured case for
+per-degradation calibration, and it is invisible to AUC alone — trap 15
+covers why it is also invisible if the threshold rule is chosen carelessly.
+
+### Chains: worst view overall, but they partially self-correct
+
+```
+mean AUC, single-transform views  0.9592
+mean AUC, chained views           0.9216   (delta -0.0376)
+```
+
+`chain_heavy` (blur 1.0 -> resize 0.25x -> noise 0.05 -> JPEG q30) is the
+**single worst view in the grid at 0.8454 AUC**, below every individual
+transform including blur_sigma2.0. Composition costs more than any one axis,
+which is the whole reason trap 11 exists.
+
+But its BAcc@t is 0.7740 — far *better* than blur_sigma2.0's 0.5070. The
+chain contains both failure directions: blur pushes scores toward AIGC, JPEG
+q30 pushes them toward real, and at the threshold they partially cancel. So
+composition **hurts ranking most and hurts calibration least**. A grid
+reporting only accuracy would have concluded chains are mild; one reporting
+only AUC would have missed that the single-transform rows are the ones at
+chance. Both columns are load-bearing.
+
+Decay across chain depth is graded rather than cliff-like for this model
+(0.9812 -> 0.9383 -> 0.8454), which is what the frozen-backbone architecture
+is supposed to buy.
+
+---
+
 ## 3. What was built
 
 ### Wave 1
@@ -483,26 +561,51 @@ the **same dataset family the paper trains on**.
 - [x] Train on clean data — DONE, section 2d. Final model
       `models/pe-core-l__linear.pt`, demo-val AUC 0.9949, FPR 0.019.
 - [x] Add `data/embeddings/`, `models/`, `data/heldout/` to `.gitignore` — DONE.
-- [ ] **Robustness grid + `0.5*AUC_clean + 0.5*AUC_robust` scoring — the single
-      biggest gap.** Half the competition score is unmeasured. All 15 pipelines
-      already exist in `build_robustness_eval_transforms()`; they need an eval
-      loop and a per-view embedding cache (which must carry a manifest
-      fingerprint — see trap 7). Settles section 2c's open hypothesis about the
-      "generated at 256x256" signal degrading under resize 0.5x/0.25x.
-      **Prerequisite fixes landed 2026-08-29 — see traps 8, 9, 10.** The grid
-      was unusable as written: its noise views destroyed 84.5% of every image,
-      it normalized with the wrong constants, and two of its views were
-      nondeterministic. No grid number produced before those fixes is valid.
-      `AUC_robust` is still undefined by us; decide between pooled (one AUC over
-      all degraded views mixed — penalizes score-scale drift across views),
-      mean-of-per-view-AUCs, and worst-case view. Recommendation on record:
-      **pooled as primary, report all three.**
+- [x] **Robustness grid + `0.5*AUC_clean + 0.5*AUC_robust` scoring** — DONE
+      2026-08-29. `main.py embed-views` caches all 18 views (clean + the 14
+      single-transform rows of 5.2 + 3 chained rows, trap 11);
+      `main.py eval-grid` scores a trained head across them and writes
+      `reports/grid__<backbone>__<stem>__<head>.csv`.
+
+      Five prerequisite defects were found and fixed on the way — traps 8, 9,
+      10, 12, 13. The grid was unusable as first written: its noise views
+      destroyed 84.5% of every image, it normalized with the wrong constants,
+      two views were nondeterministic, its seeding broke under subsampling,
+      and its staleness key was too coarse. **No grid number produced before
+      2026-08-29 is valid.**
+
+      `AUC_robust` is now reported **three ways every run** rather than
+      settled by argument: `pooled` (one AUC over all degraded views'
+      scores concatenated — additionally penalizes score-scale drift *between*
+      views), `mean` (average of per-view AUCs — blind to that drift),
+      `worst` (min per-view AUC — what an adversary who picks the transform
+      gets). Primary remains **pooled**; the gap between pooled and mean is
+      itself a diagnostic.
+
+      The grid also reports **one fixed threshold, chosen on clean and applied
+      to every view**. Re-tuning per view is the standard way to make a
+      fragile detector look robust — section 2 already recorded AUC 0.7435
+      alongside balanced accuracy 0.5047 on this project's own data, i.e.
+      intact ranking with the boundary in the wrong place. A deployed detector
+      has one threshold.
 - [ ] `predict.py --input_dir <dir> --output preds.json` emitting
       `[{"image_path": ..., "pred": <float 0-1>}, ...]` — required deliverable,
       not started.
-- [ ] Backbone race across all four (see trap 1). Deferred until the robustness
-      grid exists — clean-only AUC cannot separate them (val is already 0.9996,
+- [ ] Backbone race across all four (see trap 1). Unblocked now that the grid
+      exists — clean-only AUC cannot separate them (val is already 0.9996,
       saturated), and the grid is what actually discriminates.
+
+      **Race on `--sample-rows 2000`, not the full manifest.** The cost is not
+      4x PE-Core: dinov2-g runs at 518px (2.4x the pixels of PE-Core's 336)
+      with 1.14B params vs 316M, so all four at full size is 10+ hours. At
+      2,000 balanced rows an AUC's standard error is ~+/-0.005-0.01, far
+      tighter than the between-backbone gaps the race is trying to resolve,
+      and the seeded subsample guarantees every backbone faces the identical
+      images. Spend the full grid only on the winner and runner-up.
+
+      **Subsample images, never views.** The entire premise of the race is
+      that backbones fail on *different* transforms; dropping views removes
+      the signal being measured.
 - [ ] Augmentation ablation: clean-only vs clean + K precomputed degraded views,
       scored on the grid. See trap 4 — this only became answerable now that the
       data is clean.
@@ -655,5 +758,119 @@ the **same dataset family the paper trains on**.
     torch RNG. For a *cached* eval view that is a correctness problem, not a
     cosmetic one: re-running the grid would score a different set of images,
     so two backbones raced against each other would not face the same test.
-    `embed_views.py` seeds per `(row index, view name)` to make every view
-    byte-reproducible across runs, workers, and backbones.
+    `embed_views.py` seeds every stochastic view to make it byte-reproducible
+    across runs, workers, and backbones. **The seed key was changed once --
+    see trap 12.**
+
+11. **A single-transform grid cannot see the failure it exists to measure.
+    FIXED 2026-08-29 (3 chained views added).** The brief's 5.2 table degrades
+    one axis at a time, and a grid built only from it reports fourteen numbers
+    that all look survivable. Nothing on the internet arrives having survived
+    exactly one transform: a screenshot that was filtered, re-uploaded and
+    thumbnailed has been through four. The consistent finding in the
+    literature is that baselines degrade *gracefully* per-axis and then drop
+    off a **cliff** once transforms compose -- so a per-axis grid measures the
+    regime detectors do not fail in, and stays silent about the one they do.
+
+    `CHAIN_SPECS` in `transforms.py` adds `chain_light` (2 ops),
+    `chain_medium` (4), `chain_heavy` (4), and `eval-grid` reports the
+    single-view mean against the chained mean so the delta is explicit. Ops
+    run in **physical** order -- JPEG always last (the final upload always
+    re-encodes), noise before its JPEG (sensor noise exists at capture, and
+    compressing noisy content is precisely the interaction that breaks
+    frequency-domain detectors). Getting that order wrong makes the chain
+    milder than reality while still looking like a chain.
+
+    That ordering is why chains need `PILGaussianNoise`: the single-transform
+    noise rows must keep noise in the tensor domain (trap 8), which forces it
+    to the *end* of their pipeline. Chains apply the identical
+    `GaussianNoiseLevels` math to the PIL image instead, via a uint8
+    round-trip. The noise math is deliberately shared rather than
+    reimplemented -- two versions of "add sigma noise" would drift and the
+    chain rows would stop being comparable to the single rows.
+
+12. **Seeding a stochastic eval view by ROW INDEX breaks silently the moment
+    you subsample. FIXED 2026-08-29.** The obvious key for trap 10's seeding
+    is `(row index, view name)`, and it is wrong for the workflow this cache
+    is actually used in. A label-balanced 2,000-row subsample gives every
+    image a different row index than the full manifest does, so the same photo
+    receives a *different* noise realization and *different* jitter factors in
+    the subsample than in the full run. The subsample's numbers then differ
+    from the full run's -- by a small, plausible, entirely spurious amount
+    that reads exactly like a real effect, and that grows as you compare more
+    subsets.
+
+    Keyed on the image path (`SEED_SCHEME = "path-v1"`), an image's
+    degradations are identical wherever it appears: a subsample's grid is
+    directly comparable to the full grid, and adding rows to a manifest does
+    not rewrite every other row's noise.
+
+13. **The cached grid's staleness check is now per-view, and it invalidated
+    the pre-existing caches.** The first version hashed the whole 5.2
+    parameter table into one `transform_fingerprint` shared by all views, so
+    editing any severity -- or adding the chained views -- invalidated all of
+    them. It is now `view_fingerprint`, a hash of that view's own canonical
+    spec string (`"blur(sigma=1.0)"`, `"chain[...]"`), plus the seed scheme
+    for stochastic views only.
+
+    The spec string is built on the same line as the pipeline it describes, in
+    `transforms._build_grid`, and only there. A spec table maintained
+    separately from the pipelines is worse than no fingerprint at all: it
+    certifies the wrong thing while looking like a check.
+
+    **Consequence:** the 15 `pe-core-l__val__*.npz` written before this change
+    carry the old key and are correctly reported STALE. Re-running the full
+    val grid is ~13 min; nothing is silently wrong in the meantime.
+
+14. **Row selection is part of the cache's identity, not just its contents.**
+    `--limit N` and `--sample-rows N` both change *which* images a cache
+    holds while the filename `<backbone>__<manifest stem>__<view>.npz` stays
+    identical. The fingerprint catches it, so no wrong number results -- but
+    alternating between a subsample and the full run would have each recompute
+    destroy the other. `cache_stem()` tags the stem (`val-s2000`, `val-l500`)
+    so both live on disk at once, and `eval-grid` takes the same flags to
+    address the right one.
+
+    Also: **prefer `--sample-rows` to `--limit`.** A manifest prefix is
+    ordered by however the split was written and can be arbitrarily skewed in
+    label and source; `stratified_sample` draws n/2 per label and allocates
+    each label's quota across sources proportionally, so the subsample is a
+    miniature of the manifest. Verified on val: the 2,000-row sample's
+    generator mix tracks the full 4,200-row manifest's to within ~1pp.
+
+15. **`thresholds[argmax(balanced_accuracy)]` fabricates a robustness cliff on
+    near-separable data. FIXED 2026-08-29.** The grid freezes one threshold
+    chosen on the clean view. The obvious way to choose it is wrong here.
+
+    `sklearn.roc_curve` only emits thresholds at *observed score values*. When
+    clean is perfectly separable — and it nearly is on this data, val AUC
+    0.9996 — every threshold in the open interval (highest real score, lowest
+    AIGC score] is equally optimal, but that whole interval is represented by
+    a **single index**. `argmax` returns its top end, which puts the decision
+    boundary flush against the lowest-scoring AIGC image, with the entire
+    margin sitting unused on the real side.
+
+    Every degraded view is then measured at an operating point where any
+    downward score drift at all is an immediate false negative. Measured on
+    the same 64-row cache, before vs after taking the midpoint of the margin
+    instead:
+
+    ```
+    threshold   0.8364 (edge)      0.4183 (margin midpoint)
+    jpeg_q30    BAcc 0.7031        BAcc 0.8750
+    jpeg_q70    BAcc 0.7812        BAcc 0.9062
+    blur_sig2.0 BAcc 0.5156        BAcc 0.5000   (FPR 0.91 -> 1.00)
+    ```
+
+    Both columns are "balanced-accuracy-optimal on clean" and both report
+    BAcc 1.0000 there. The JPEG rows moved by up to 17 points on the choice of
+    tie-break alone. Nothing warns you: the clean row looks perfect either way.
+
+    **What the corrected numbers then show is a real asymmetry, and it is the
+    interesting result:** JPEG pushes scores *down* (false negatives, TPR
+    falls, FPR stays 0), while blur and resize push scores *up* — FPR goes to
+    1.00, i.e. the head calls **every blurred or downscaled real photo AIGC**.
+    The two failure modes point in opposite directions, so no single threshold
+    can fix both. That is the concrete case for per-degradation calibration,
+    and it is only visible once the threshold rule stops manufacturing
+    failures of its own.

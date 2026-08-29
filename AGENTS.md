@@ -48,6 +48,16 @@ src/aigc_detect/
                                  params. Ship the VISION TOWER only.
   embed.py                      precompute_embeddings() -> cached .npz under
                                  data/embeddings/<backbone>__<manifest>.npz
+  embed_views.py                Same, but one .npz per ROBUSTNESS VIEW (18:
+                                 clean + 14 single-transform + 3 chained), from
+                                 a single decode per image. --sample-rows draws
+                                 a seeded label-balanced subsample and tags the
+                                 cache stem. Read its docstring before touching
+                                 seeding or cache keys.
+  eval_grid.py                  Scores a trained head across every cached view:
+                                 per-view AUC/BAcc at ONE fixed threshold,
+                                 AUC_robust three ways, robustness gap,
+                                 single-vs-chained delta. Deliverable 5.5.4.
   heads.py                      LinearHead / MLPHead / build_head(kind, in_dim)
   train_head.py                 Paper recipe (AdamW lr 1e-3, bs 128, 2 epochs)
                                  on cached embeddings; per-source val AUC
@@ -76,34 +86,36 @@ data/
 ## Current state (as of 2026-08-29)
 
 **Built & verified:** environment/CUDA, dataset download + indexing, the
-augmentation pipeline, the stratified train/val split, the COCO half of
+augmentation pipeline, generator-aware stratified splits, both halves of
 demo-val, the shortcut audit (`audit_data.py`), the aspect-preserving
-resize fix, and the full frozen-backbone + probe-head pipeline
-(`backbones.py` / `embed.py` / `heads.py` / `train_head.py`).
+resize fix, the full frozen-backbone + probe-head pipeline
+(`backbones.py` / `embed.py` / `heads.py` / `train_head.py`), and the
+robustness grid (`embed_views.py` / `eval_grid.py`).
 
-**Data on disk:** CIFAKE full (120,000 images), SID_Set 4000/class subset
-(8,000 images) → split into `train.csv` (108,800) / `val.csv` (19,200).
-COCO val2017 (5,000 images) → `demo_val.csv` (reals only, so it cannot
-currently produce a score at all).
+**Data on disk (training pool is Tiny-GenImage ONLY):** `train.csv`
+(23,800) / `val.csv` (4,200), `heldout.csv` (7,000, in-distribution,
+never trained on), `demo_val.csv` (13,843 = COCO val2017 + WildFake
+DALL·E Advanced, self-reported eval only).
 
-**Model bring-up:** only `pe-core-l` has been run end to end (val
-embeddings cached, linear head trained on a 5,000-row slice). The other
-three backbones are wired but deliberately untouched — see FINDINGS.md
-trap 1: racing backbones on shortcut-contaminated data ranks them by
-shortcut exploitation, not by detection ability.
+**CIFAKE and SID_Set were both dropped from training** — SID_Set carries
+a composition shortcut (0.93 balanced accuracy from an 8x8 greyscale
+thumbnail; a SID_Set-trained head transfers to CIFAKE at chance) and
+CIFAKE measured as actively harmful. See FINDINGS.md sections 1 and 2d.
+The images may still be on disk; the manifests do not reference them.
 
-**Blocking issue:** SID_Set is unusable as training data (composition
-shortcut — 0.93 balanced accuracy from an 8x8 greyscale thumbnail, and a
-SID_Set-trained head transfers to CIFAKE at chance). Replacement source
-identified: `TheKernel01/Tiny-GenImage`. Full detail in FINDINGS.md.
+**Model bring-up:** only `pe-core-l` has been run end to end —
+`models/pe-core-l__linear.pt`, demo-val AUC 0.9949 / FPR 0.019. The other
+three backbones are wired but not yet raced; do that on
+`--sample-rows 2000` against the grid, not on clean AUC (val is saturated
+at 0.9996). See FINDINGS.md section 7.
 
 **Not built yet:**
-- Tiny-GenImage ingestion + generator-aware splits
 - Inference script emitting `{image_path, pred}` JSON (required deliverable)
-- Robustness evaluation report + `0.5*AUC_clean + 0.5*AUC_robust` scoring
+- Backbone race across the remaining three (unblocked — grid now exists)
+- Augmented-view training ablation (needs `embed-views --manifest train`)
+- Cross-generator evaluation via `split --holdout-generators`
 - Calibration (temperature + threshold per degradation bucket)
 - Error analysis note (false positive/negative examples, trade-offs)
-- WildFake "DALL·E Advanced" demo-val half — manual download in progress
 
 ## Key decisions / constraints
 

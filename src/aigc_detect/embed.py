@@ -32,6 +32,20 @@ def embeddings_path(backbone_key: str, manifest_path: str | Path) -> Path:
     return EMBEDDINGS_DIR / f"{backbone_key}__{manifest_stem}.npz"
 
 
+def fingerprint_paths(paths) -> str:
+    """SHA1 over an ordered sequence of image paths.
+
+    Shared by ``manifest_fingerprint`` (whole manifest) and the per-view
+    embedder (which fingerprints the *selected subset* of rows, since a
+    stratified sample is not a prefix of the manifest).
+    """
+    h = hashlib.sha1()
+    for p in paths:
+        h.update(str(p).encode("utf-8", "replace"))
+        h.update(b"\n")
+    return h.hexdigest()
+
+
 def manifest_fingerprint(manifest_path: str | Path, limit: int | None = None) -> str:
     """SHA1 over the manifest's image_path column (in order), so a cached .npz
     can be invalidated when the manifest changes.
@@ -44,11 +58,7 @@ def manifest_fingerprint(manifest_path: str | Path, limit: int | None = None) ->
     df = pd.read_csv(manifest_path, usecols=["image_path"])
     if limit is not None and limit < len(df):
         df = df.iloc[:limit]
-    h = hashlib.sha1()
-    for p in df["image_path"]:
-        h.update(str(p).encode("utf-8", "replace"))
-        h.update(b"\n")
-    return h.hexdigest()
+    return fingerprint_paths(df["image_path"])
 
 
 def precompute_embeddings(

@@ -167,14 +167,33 @@ Three builders:
 - `build_eval_transform()` — deterministic resize+normalize only ("clean"),
   for local validation accuracy.
 - `build_robustness_eval_transforms()` — one **deterministic** pipeline per
-  (transform, severity) pair in the table, plus `"clean"`, e.g. `jpeg_q50`,
-  `blur_sigma1.0`, `resize_0.25x`. Feed each to a separate eval `DataLoader`
-  over `val.csv` to produce the clean-vs-transformed comparison table
+  (transform, severity) pair in the table, plus `"clean"` and three
+  **chained** views, e.g. `jpeg_q50`, `blur_sigma1.0`, `resize_0.25x`,
+  `chain_heavy`. These drive the clean-vs-transformed comparison table
   required by deliverable 5.5.4 (Robustness Evaluation Summary).
 
-Verified with `uv run main.py preview-augment` against a synthetic manifest;
-all 15 pipelines (`clean` + 4 JPEG + 3 blur + 2 resize + 3 noise + color
-jitter + center crop) produce correctly-shaped `(3, 224, 224)` float tensors.
+18 views total: `clean` + 4 JPEG + 3 blur + 2 resize + 3 noise + color jitter
++ center crop + 3 chains.
+
+### Chained views
+
+The 5.2 table degrades one axis at a time, but nothing reaches a detector
+having survived exactly one transform — a screenshot that was filtered,
+re-uploaded and thumbnailed has been through four. Detectors typically decay
+*gracefully* per-axis and then fall off a **cliff** once transforms compose,
+so a per-axis-only grid measures the regime they don't fail in.
+
+| View | Ops | Scenario |
+|---|---|---|
+| `chain_light` | resize 0.5x → JPEG q70 | a single re-upload |
+| `chain_medium` | crop 80% → jitter → resize 0.5x → JPEG q50 | screenshot → filter app → re-upload |
+| `chain_heavy` | blur σ1.0 → resize 0.25x → noise σ0.05 → JPEG q30 | a repost of a repost |
+
+Ops run in **physical** order: JPEG last (the final upload always
+re-encodes), noise before its JPEG (sensor noise exists at capture, and
+compressing noisy content is the interaction that breaks frequency-domain
+detectors). `eval-grid` reports the single-view mean against the chained mean
+so the delta is explicit.
 
 ## Model pipeline
 
@@ -190,6 +209,36 @@ uv run main.py embed --backbone pe-core-l --manifest val [--limit N]
 uv run main.py train-head --backbone pe-core-l [--head linear|mlp]
 ```
 
+### Robustness grid (deliverable 5.5.4)
+
+```bash
+# cache all 18 views for a seeded, label-balanced 2,000-row subsample
+uv run main.py embed-views --backbone pe-core-l --manifest val --sample-rows 2000
+# score the trained head across them (no GPU work)
+uv run main.py eval-grid  --backbone pe-core-l --manifest val --sample-rows 2000
+```
+
+`embed-views` decodes each image **once** and pushes all 18 views through the
+backbone in one pass, so every view of an image provably derives from
+identical source pixels. Caches land at
+`data/embeddings/<backbone>__<stem>__<view>.npz` (float16 — lossless here,
+since the forward runs under AMP).
+
+`--sample-rows N` draws a label-balanced, source-proportional subsample and
+tags the cache stem (`val-s2000`), so it coexists with the full run. This is
+the intended path for **racing backbones**: at 2,000 rows an AUC's standard
+error is ~±0.005–0.01, far tighter than the between-backbone gaps, and it
+costs minutes instead of hours per backbone. Subsample images, never views —
+backbones fail on *different* transforms, so dropping views removes the
+signal being measured.
+
+`eval-grid` reports per-view AUC and balanced accuracy at **one fixed
+threshold** chosen on the clean view (re-tuning per view is how a fragile
+detector is made to look robust), `AUC_robust` three ways (pooled / mean /
+worst) with the corresponding `0.5*AUC_clean + 0.5*AUC_robust`, the
+robustness gap, and the single-vs-chained delta. Per-view CSV goes to
+`reports/`.
+
 Registry (all ungated on HuggingFace, vision tower only, asserted <2B params):
 `metaclip2-h` (1280-dim, 224px, 630.8M) · `dinov3-l` (1024, 256) ·
 `pe-core-l` (1024, 336, 316.1M) · `dinov2-g` (1536, 518).
@@ -199,12 +248,12 @@ training takes seconds and ablations are essentially free.
 
 ## Not yet built
 
-- Tiny-GenImage ingestion + generator-aware splits (current blocking task).
 - Inference script emitting `{image_path, pred}` JSON per deliverable 5.5.2.
-- Robustness evaluation report + `0.5*AUC_clean + 0.5*AUC_robust` scoring.
+- Backbone race across the remaining three (unblocked — the grid now exists).
+- Augmented-view training ablation (`embed-views --manifest train`).
+- Cross-generator evaluation via `split --holdout-generators`.
 - Calibration (temperature + threshold per degradation bucket).
 - Error analysis note (5.5.5).
-- WildFake ingestion (see note above).
 
 ## Team
 

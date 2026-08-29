@@ -17,9 +17,12 @@ Two pipelines are exposed:
     real-world degradations above, so the classifier learns to be robust to them.
   * ``build_eval_transform``      — deterministic resize/normalize only ("clean").
   * ``build_robustness_eval_transforms`` — one deterministic pipeline *per*
-    (transform, severity) combination in the table, plus "clean", for the
-    robustness evaluation summary deliverable (5.5.4): apply each in isolation
-    at a fixed severity so clean-vs-transformed accuracy is directly comparable.
+    (transform, severity) combination in the table, plus "clean" and three
+    *chained* views, for the robustness evaluation summary deliverable (5.5.4):
+    apply each in isolation at a fixed severity so clean-vs-transformed accuracy
+    is directly comparable. 18 views total (1 clean + 14 single + 3 chained).
+    ``build_robustness_views`` returns the same pipelines plus a canonical spec
+    string per view, which the embedding cache fingerprints against.
 
 Resize tail (``build_backbone_transform``): all three pipelines above end in
 an *aspect-preserving* resize-shortest-side + square crop, not a plain
@@ -57,6 +60,42 @@ RESIZE_SCALES = (0.5, 0.25)
 NOISE_SIGMAS = (0.02, 0.05, 0.10)
 COLOR_JITTER_STRENGTH = 0.20  # +/-20% brightness/contrast/saturation
 CENTER_CROP_FRACTION = 0.80
+
+# ---------------------------------------------------------------------------
+# Chained views (an extension of the 5.2 table, not a replacement for it).
+#
+# The 5.2 table degrades one axis at a time, but nothing on the internet
+# reaches a detector having survived exactly one transform. A photo that is
+# screenshotted, run through a filter app, re-uploaded and thumbnailed has been
+# through four, and the literature is consistent that this is where
+# single-transform-looking-fine detectors fall off a cliff rather than decaying
+# smoothly. A grid without a chained column cannot see that cliff: it reports
+# the per-axis numbers, all of which look survivable, and misses that their
+# composition does not.
+#
+# Three chains of increasing depth, so the report shows a decay *curve* rather
+# than one composite point:
+#
+#   chain_light   2 ops  a single re-upload (thumbnail + re-encode)
+#   chain_medium  4 ops  screenshot -> filter app -> re-upload
+#   chain_heavy   4 ops  a repost of a repost: soft source, hard downscale,
+#                        sensor noise, aggressive final encode
+#
+# Op ordering is the physical one, not a convenient one. JPEG is always LAST
+# because the final upload always re-encodes, and noise sits BEFORE its JPEG
+# because sensor noise exists at capture -- compressing noisy content is
+# exactly the interaction that breaks frequency-domain detectors, and noise
+# applied after the encode would not exercise it. That ordering is why chains
+# need `PILGaussianNoise` rather than the tensor-domain noise the single-view
+# rows use (see its docstring, and FINDINGS trap 8 for why the single views
+# cannot simply be moved too).
+# ---------------------------------------------------------------------------
+
+CHAIN_SPECS: dict[str, tuple[tuple[str, float | int | None], ...]] = {
+    "chain_light": (("resize", 0.5), ("jpeg", 70)),
+    "chain_medium": (("crop80", None), ("jitter", None), ("resize", 0.5), ("jpeg", 50)),
+    "chain_heavy": (("blur", 1.0), ("resize", 0.25), ("noise", 0.05), ("jpeg", 30)),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +160,32 @@ class GaussianNoiseLevels:
         s = sigma if sigma is not None else random.choice(self.sigmas)
         noise = torch.randn_like(img) * s
         return (img + noise).clamp(0.0, 1.0)
+
+
+class PILGaussianNoise:
+    """``GaussianNoiseLevels`` applied to a PIL image via a uint8 round-trip.
+
+    Used only by the chained views. The single-transform noise rows keep noise
+    in the tensor domain because that is the only place its [0, 1] clamp is
+    valid (FINDINGS trap 8), which forces those rows to apply noise *after* the
+    backbone resize and after any other op. A chain needs noise earlier -- real
+    sensor noise precedes the re-encode -- so the identical noise math is run
+    on the PIL image and quantized back to uint8, which is what a noisy image
+    on disk is anyway.
+
+    The math is shared with the tensor-domain path deliberately: two
+    implementations of "add sigma noise" would silently drift apart and the
+    chain rows would stop being comparable to the single-transform rows.
+    """
+
+    def __init__(self, noise: GaussianNoiseLevels, sigma: float):
+        self.noise = noise
+        self.sigma = sigma
+
+    def __call__(self, img: Image.Image) -> Image.Image:
+        t = v2.functional.to_dtype(v2.functional.to_image(img), torch.float32, scale=True)
+        t = self.noise(t, sigma=self.sigma)  # same clamp, same sigma semantics
+        return v2.functional.to_pil_image((t * 255.0).round().to(torch.uint8))
 
 
 class CenterCropFraction:
@@ -281,16 +346,52 @@ def build_eval_transform(
     )
 
 
+def build_robustness_views(
+    image_size: int = IMAGE_SIZE,
+    norm_mean: tuple[float, ...] = NORM_MEAN,
+    norm_std: tuple[float, ...] = NORM_STD,
+) -> tuple[dict[str, v2.Compose], dict[str, str]]:
+    """Build the robustness grid and, alongside it, a canonical *spec string*
+    for every view.
+
+    Returns ``(pipelines, specs)``. ``specs[name]`` is a short string naming
+    exactly the operations and severities behind that view, e.g.
+    ``"blur(sigma=1.0)"`` or ``"chain[blur(sigma=1.0)>resize(scale=0.25)>
+    noise(sigma=0.05)>jpeg(q=30)]|stochastic"``. It exists because a view name
+    is only a *label*: editing ``BLUR_SIGMAS`` changes what ``blur_sigma1.0``
+    means while every cache file keeping that name still loads. The embedder
+    hashes the spec into each cached ``.npz`` and refuses a cache whose spec
+    has moved (see ``embed_views.view_fingerprint``).
+
+    The spec is built on the same line as the pipeline it describes, and only
+    ever there, so the two cannot drift -- a spec table written separately from
+    the pipelines would be a fingerprint that certifies the wrong thing.
+
+    The ``|stochastic`` suffix marks the views that sample randomness
+    (``color_jitter`` and anything containing noise or jitter); the embedder
+    seeds exactly those and folds its seeding scheme into their fingerprint.
+
+    Grid contents: "clean", the 14 single-transform rows of the brief's 5.2
+    table, and the 3 chained rows of ``CHAIN_SPECS`` -- 18 views total.
+    """
+    pipelines, specs = _build_grid(image_size, norm_mean, norm_std)
+    return pipelines, specs
+
+
 def build_robustness_eval_transforms(
     image_size: int = IMAGE_SIZE,
     norm_mean: tuple[float, ...] = NORM_MEAN,
     norm_std: tuple[float, ...] = NORM_STD,
 ) -> dict[str, v2.Compose]:
     """One deterministic pipeline per (transform, severity) in the table, plus
-    "clean". Keys are stable, human-readable names, e.g. "jpeg_q50",
-    "blur_sigma1.0", "resize_0.25x", "noise_sigma0.05", "color_jitter",
-    "center_crop_80". Use these to build separate eval DataLoaders and report
-    clean-vs-transformed accuracy per 5.5.4 (Robustness Evaluation Summary).
+    "clean" and the chained views. Keys are stable, human-readable names, e.g.
+    "jpeg_q50", "blur_sigma1.0", "resize_0.25x", "noise_sigma0.05",
+    "color_jitter", "center_crop_80", "chain_heavy". Use these to build
+    separate eval DataLoaders and report clean-vs-transformed accuracy per
+    5.5.4 (Robustness Evaluation Summary).
+
+    Thin wrapper over ``build_robustness_views`` for callers that do not need
+    the spec strings.
 
     Two things here are easy to get wrong and are silent when wrong:
 
@@ -309,44 +410,99 @@ def build_robustness_eval_transforms(
        never trained with and the "clean" view silently disagrees with the
        existing cached clean embeddings.
     """
+    return _build_grid(image_size, norm_mean, norm_std)[0]
+
+
+def _build_grid(
+    image_size: int,
+    norm_mean: tuple[float, ...],
+    norm_std: tuple[float, ...],
+) -> tuple[dict[str, v2.Compose], dict[str, str]]:
+    """Single source of truth for the grid. See build_robustness_views."""
     to_tensor = [v2.ToImage(), v2.ToDtype(torch.float32, scale=True)]  # -> float in [0, 1]
     normalize = [v2.Normalize(mean=norm_mean, std=norm_std)]
     base_post = [*to_tensor, *normalize]
     resize_step = v2.Compose(build_backbone_transform(image_size))  # shortest-side resize + center crop
 
-    pipelines: dict[str, v2.Compose] = {
-        "clean": v2.Compose([resize_step, *base_post]),
-    }
+    pipelines: dict[str, v2.Compose] = {}
+    specs: dict[str, str] = {}
+
+    def add(name: str, spec: str, steps: list) -> None:
+        """Register a view. Pipeline and spec are written together, on purpose."""
+        pipelines[name] = v2.Compose(steps)
+        specs[name] = spec
+
+    add("clean", "clean", [resize_step, *base_post])
 
     # FixedSeverity rather than v2.Lambda(lambda ...) throughout: these pipelines
     # get pickled to DataLoader workers under Windows' spawn start method.
     jpeg = JPEGCompression()
     for q in JPEG_QUALITIES:
-        pipelines[f"jpeg_q{q}"] = v2.Compose(
-            [FixedSeverity(jpeg, quality=q), resize_step, *base_post]
-        )
+        add(f"jpeg_q{q}", f"jpeg(q={q})", [FixedSeverity(jpeg, quality=q), resize_step, *base_post])
 
     blur = GaussianBlurLevels()
     for s in BLUR_SIGMAS:
-        pipelines[f"blur_sigma{s}"] = v2.Compose(
-            [FixedSeverity(blur, sigma=s), resize_step, *base_post]
-        )
+        add(f"blur_sigma{s}", f"blur(sigma={s})", [FixedSeverity(blur, sigma=s), resize_step, *base_post])
 
     resize_rt = ResizeRoundTrip()
     for s in RESIZE_SCALES:
-        pipelines[f"resize_{s}x"] = v2.Compose(
-            [FixedSeverity(resize_rt, scale=s), resize_step, *base_post]
-        )
+        add(f"resize_{s}x", f"resize(scale={s})", [FixedSeverity(resize_rt, scale=s), resize_step, *base_post])
 
     # Noise is the one tensor-domain transform: applied to the [0, 1] tensor and
     # normalized afterwards (see note 1 above -- the ordering is load-bearing).
     noise = GaussianNoiseLevels()
     for s in NOISE_SIGMAS:
-        pipelines[f"noise_sigma{s}"] = v2.Compose(
-            [resize_step, *to_tensor, FixedSeverity(noise, sigma=s), *normalize]
+        add(
+            f"noise_sigma{s}",
+            f"noise(sigma={s})|stochastic",
+            [resize_step, *to_tensor, FixedSeverity(noise, sigma=s), *normalize],
         )
 
-    pipelines["color_jitter"] = v2.Compose([make_color_jitter(), resize_step, *base_post])
-    pipelines["center_crop_80"] = v2.Compose([CenterCropFraction(), resize_step, *base_post])
+    add(
+        "color_jitter",
+        f"color_jitter(strength={COLOR_JITTER_STRENGTH})|stochastic",
+        [make_color_jitter(), resize_step, *base_post],
+    )
+    add(
+        "center_crop_80",
+        f"center_crop(frac={CENTER_CROP_FRACTION})",
+        [CenterCropFraction(), resize_step, *base_post],
+    )
 
-    return pipelines
+    # Chained views. Every op here is PIL-domain (including noise, via
+    # PILGaussianNoise) so the chain can be applied in physical order, ending
+    # with the final re-encode -- see the CHAIN_SPECS comment block.
+    for name, ops in CHAIN_SPECS.items():
+        steps, parts, stochastic = [], [], False
+        for op, param in ops:
+            if op == "jpeg":
+                steps.append(FixedSeverity(jpeg, quality=param))
+                parts.append(f"jpeg(q={param})")
+            elif op == "blur":
+                steps.append(FixedSeverity(blur, sigma=param))
+                parts.append(f"blur(sigma={param})")
+            elif op == "resize":
+                steps.append(FixedSeverity(resize_rt, scale=param))
+                parts.append(f"resize(scale={param})")
+            elif op == "noise":
+                steps.append(PILGaussianNoise(noise, sigma=param))
+                parts.append(f"pil_noise(sigma={param})")
+                stochastic = True
+            elif op == "jitter":
+                steps.append(make_color_jitter())
+                parts.append(f"color_jitter(strength={COLOR_JITTER_STRENGTH})")
+                stochastic = True
+            elif op == "crop80":
+                steps.append(CenterCropFraction())
+                parts.append(f"center_crop(frac={CENTER_CROP_FRACTION})")
+            else:
+                raise ValueError(f"Unknown chain op '{op}' in CHAIN_SPECS['{name}']")
+        spec = "chain[" + ">".join(parts) + "]" + ("|stochastic" if stochastic else "")
+        add(name, spec, [*steps, resize_step, *base_post])
+
+    return pipelines, specs
+
+
+def chain_view_names() -> tuple[str, ...]:
+    """Names of the chained views, in declaration (increasing-depth) order."""
+    return tuple(CHAIN_SPECS)
