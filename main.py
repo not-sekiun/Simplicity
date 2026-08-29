@@ -25,6 +25,15 @@ Subcommands:
                                       first - see scripts/download_demo_val.py docstring).
     build-demo-val                   Merge demo-val indexes into data/demo_val/demo_val.csv.
                                       NEVER used for training - see 5.4 in the brief.
+    download-ood [--per-generator N] [--max-scan N] [--min-scan N] [--seed S]
+                 [--force]
+                                      Stream a capped, generator-balanced slice of
+                                      TheKernel01/AIGC-Detection-Benchmark into data/ood/ --
+                                      a deliberately HARD out-of-distribution tier
+                                      (10 of 18 generators unseen in training). Evaluation
+                                      only, never trained on.
+    build-ood                        Merge data/ood/*_index.csv into data/ood/ood.csv.
+                                      Evaluation only, never trained on.
     build-heldout                    Merge data/heldout/*_index.csv into
                                       data/heldout/heldout.csv. Cross-generator test set,
                                       NEVER used for training.
@@ -42,6 +51,7 @@ Subcommands:
                                       demo-val is EVALUATION ONLY (see 5.4).
     embed-views --backbone KEY --manifest {train,val,heldout,demo-val}
                 [--views V ...] [--force] [--limit N] [--sample-rows N]
+                [--train-chains]
                                       Same, but for all 18 robustness views: clean,
                                       the 14 single-transform rows of the 5.2 table,
                                       and 3 chained rows. One decode per image feeds
@@ -52,7 +62,22 @@ Subcommands:
                                       source-proportional subsample (seeded, so every
                                       backbone faces the identical subset) and tags
                                       the cache stem with it -- the intended path for
-                                      racing backbones cheaply.
+                                      racing backbones cheaply. --train-chains also
+                                      computes 4 extra trainchain_* views (train
+                                      manifest only) -- augmentation material for
+                                      train-head-views, never scored by eval-grid.
+    train-head-views --backbone KEY [--train-sample-rows N] [--val-sample-rows N]
+                      [--train-views V ...] [--with-chains] [--clean-only]
+                      [--head linear|mlp] [--epochs E] [--lr LR]
+                      [--batch-size B] [--weight-decay WD] [--out PATH]
+                                      Train a head on cached CLEAN + DEGRADED
+                                      embeddings (run `embed-views` for train and val
+                                      first). The augmentation ablation: default trains
+                                      on one severity per family and holds the rest,
+                                      including all 3 scored chains, out for
+                                      evaluation only. --with-chains additionally
+                                      trains on the 4 trainchain_* composition views
+                                      (--sample-rows must match what embed-views used).
     eval-grid --backbone KEY --manifest {train,val,heldout,demo-val} [--head PATH]
               [--sample-rows N] [--limit N]
                                       Score a trained head over every cached view:
@@ -88,7 +113,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from aigc_detect.config import (  # noqa: E402
-    OOD_DIR,
     OOD_MANIFEST,
     ROOT_DIR,
     DEMO_VAL_DIR,
@@ -343,6 +367,11 @@ def cmd_train_head_views(args):
         batch_size=args.batch_size,
         weight_decay=args.weight_decay,
         out_path=args.out,
+        train_manifest=TRAIN_MANIFEST,
+        train_sample_rows=args.train_sample_rows,
+        val_manifest=VAL_MANIFEST,
+        val_sample_rows=args.val_sample_rows,
+        seed=args.seed,
     )
 
 
@@ -467,7 +496,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_dl_ood.add_argument("--per-generator", type=int, default=250)
     p_dl_ood.add_argument("--max-scan", type=int, default=60_000)
-    p_dl_ood.add_argument("--min-scan", type=int, default=15_000)
+    p_dl_ood.add_argument("--min-scan", type=int, default=2_000)
     p_dl_ood.add_argument("--seed", type=int, default=RANDOM_SEED)
     p_dl_ood.add_argument("--force", action="store_true")
     p_dl_ood.set_defaults(func=cmd_download_ood)
@@ -565,6 +594,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_thv.add_argument("--lr", type=float, default=1e-3)
     p_thv.add_argument("--batch-size", type=int, default=128)
     p_thv.add_argument("--weight-decay", type=float, default=0.0)
+    p_thv.add_argument("--seed", type=int, default=RANDOM_SEED,
+                       help="Seeds head init and DataLoader shuffle. Unseeded runs vary ~+/-0.0005 AUC.")
     p_thv.add_argument("--out", default=None, help="Checkpoint path (default: models/<backbone>__<kind>__<tag>.pt).")
     p_thv.set_defaults(func=cmd_train_head_views)
 

@@ -118,6 +118,62 @@ def view_fingerprint(spec: str) -> str:
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()
 
 
+def load_view_cache(
+    backbone_key: str,
+    stem: str,
+    view: str,
+    spec: str,
+    expected_manifest_fp: str | None = None,
+) -> tuple[np.ndarray, np.ndarray, dict]:
+    """Load one cached view, verifying its integrity fields.
+
+    Every consumer of a view cache must go through this: the cache filename
+    (<backbone>__<stem>__<view>.npz) does not uniquely identify its contents --
+    `main.py split` rewrites manifests in place under the same filename, and
+    editing a transform severity changes what a view name means. A stale cache
+    therefore produces confident, plausible, WRONG numbers rather than an
+    error, so both fingerprints are checked before anything is returned.
+
+    Returns ``(embeddings, labels, meta)``: embeddings as float32, labels as
+    int64, and ``meta`` a dict with at least ``"manifest_fingerprint"``, plus
+    ``"sources"``/``"generators"``/``"image_paths"`` when present in the file.
+
+    Raises ``SystemExit`` with an actionable message naming the file and the
+    re-run command if: the file is missing, it has no ``view_fingerprint``,
+    its ``view_fingerprint`` != ``view_fingerprint(spec)``, or
+    ``expected_manifest_fp`` is given and does not match the cached
+    ``manifest_fingerprint``.
+    """
+    path = view_embeddings_path(backbone_key, stem, view)
+    if not path.exists():
+        raise SystemExit(
+            f"[load-view-cache] missing {path.name}. Run: uv run main.py embed-views "
+            f"--backbone {backbone_key} --views {view} (plus --manifest/--sample-rows matching "
+            f"cache_stem '{stem}')"
+        )
+    with np.load(path, allow_pickle=True) as d:
+        if "view_fingerprint" not in d or str(d["view_fingerprint"]) != view_fingerprint(spec):
+            raise SystemExit(
+                f"[load-view-cache] STALE: {path.name} was computed under a different definition "
+                f"of view '{view}' (spec is now {spec!r}). Re-run: uv run main.py embed-views "
+                f"--backbone {backbone_key} --force"
+            )
+        m_fp = str(d["manifest_fingerprint"]) if "manifest_fingerprint" in d else None
+        if expected_manifest_fp is not None and m_fp != expected_manifest_fp:
+            raise SystemExit(
+                f"[load-view-cache] STALE: {path.name} was computed from a different row "
+                f"selection than the manifest yields now (the split was rebuilt). "
+                f"Re-run: uv run main.py embed-views --backbone {backbone_key} --force"
+            )
+        embeddings = d["embeddings"].astype(np.float32)
+        labels = d["labels"].astype(np.int64)
+        meta: dict = {"manifest_fingerprint": m_fp}
+        for key in ("sources", "generators", "image_paths"):
+            if key in d:
+                meta[key] = d[key].astype(str)
+    return embeddings, labels, meta
+
+
 def _view_seed(image_path: str, view: str) -> int:
     """Stable per-(image, view) seed. Derived from a hash of the path rather
     than from the row index, so an image's degradations do not change when it

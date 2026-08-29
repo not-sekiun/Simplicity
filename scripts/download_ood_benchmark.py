@@ -23,16 +23,35 @@ evaluation FINDINGS has had open since the Tiny-GenImage ingest and which has
 never actually been run.
 
 STREAMING + QUOTAS. 32GB is far more than we need, so the test split is
-streamed and each generator gets a quota. Two details matter:
+streamed and each generator gets a quota. Three details matter:
 
-  1. `.shuffle(seed, buffer_size)` is applied, which in streaming mode also
-     shuffles SHARD ORDER. Without it, a parquet ordered by generator would
-     force us to stream nearly the whole 32GB before the last generator's
-     quota filled.
+  1. **Shuffling is OFF by default (`--shuffle-buffer 0`), deliberately.** The
+     obvious guard against a generator-ordered parquet is `.shuffle(seed,
+     buffer_size)`, which in streaming mode also shuffles shard order. It was
+     tried and is actively harmful here: a streaming shuffle must FILL its
+     buffer before yielding a single example, so `buffer_size=10_000` blocked
+     for over seven minutes having emitted nothing. It is also unnecessary --
+     probing the raw stream showed shard 0 already interleaves generators
+     (`Real, ADM, Real, ...`), which is the exact risk shuffle was guarding
+     against. Set `--shuffle-buffer N` to re-enable it if a future revision of
+     the dataset turns out to be generator-blocked.
+     Cost of leaving it off: within each generator we take the first N in file
+     order rather than a random N. Acceptable for an eval tier; noted here so
+     nobody reads generator-internal ordering as random.
   2. Reals get a global quota equal to the sum of the fake quotas, so the tier
      lands roughly label-balanced. `stratified_sample` downstream balances by
      (label, source) and this tier is a single source, so generator balance has
      to be established HERE -- it cannot be recovered later.
+  3. A `--min-scan` floor prevents early-stopping before the rarer generators
+     have had a fair chance to appear. Without it the run could stop having
+     never seen the unseen-generator classes this tier exists to test. The
+     default is small because the stream was MEASURED to be near-perfectly
+     round-robin: the first 837 rows contained all 18 generator classes at
+     25 each (plus 419 reals). Raise it if that ever stops holding.
+
+MEASURED THROUGHPUT: ~8.4 images/sec from this network. Filling 250 per fake
+generator needs roughly 8,400 rows scanned, i.e. ~17 minutes -- the quotas, not
+the 32GB total, set the cost.
 
 Every image is re-encoded as JPEG quality 95, exactly as Tiny-GenImage is.
 This is not cosmetic: leaving source formats alone reopens the compression
@@ -60,23 +79,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from aigc_detect.config import LABEL_AIGC, LABEL_REAL, OOD_DIR  # noqa: E402
+from aigc_detect.config import LABEL_AIGC, LABEL_REAL, OOD_DIR, TRAIN_GENERATORS  # noqa: E402
 
 OOD_HF_HANDLE = "TheKernel01/AIGC-Detection-Benchmark"
 OOD_INDEX = OOD_DIR / "aigc_detect_bench_index.csv"
 SOURCE_NAME = "aigc_detect_bench"
 
-# Generators already present in data/raw/ (our training pool). Recorded so the
-# eval can split "seen" from "unseen" generators, which is the whole point of
-# this tier.
-TRAIN_GENERATORS = frozenset({"Real", "ADM", "BigGAN", "GLIDE", "Midjourney", "SD15", "VQDM", "Wukong"})
-
 
 def download_ood_benchmark(
     per_generator: int = 200,
     max_scan: int | None = 60_000,
-    min_scan: int = 15_000,
-    shuffle_buffer: int = 10_000,
+    min_scan: int = 2_000,
+    shuffle_buffer: int = 0,
     seed: int = 42,
     force: bool = False,
 ) -> Path:
@@ -87,7 +101,8 @@ def download_ood_benchmark(
     print(f"[ood] streaming '{OOD_HF_HANDLE}' split='test' (32GB total; quotas cap what we keep)")
 
     ds = load_dataset(OOD_HF_HANDLE, split="test", streaming=True)
-    ds = ds.shuffle(seed=seed, buffer_size=shuffle_buffer)  # also shuffles shard order
+    if shuffle_buffer > 0:
+        ds = ds.shuffle(seed=seed, buffer_size=shuffle_buffer)
 
     feats = getattr(ds, "features", None) or {}
     gen_names = feats["generator"].names if "generator" in feats and hasattr(feats["generator"], "names") else None
@@ -104,7 +119,6 @@ def download_ood_benchmark(
     real_cap = per_generator * 16  # ~16 fake classes; reals capped to match the fake total
     records: list[tuple[str, int, str]] = []
     scanned = 0
-    seen_gens: set[str] = set()
 
     bar = tqdm(desc="[ood] scanning", unit="img")
     for ex in ds:
@@ -117,7 +131,6 @@ def download_ood_benchmark(
         raw_label = ex["label"]
         norm_label = label_map[int(raw_label)]
         generator = gen_of(ex)
-        seen_gens.add(generator)
 
         if norm_label == LABEL_REAL:
             if real_kept >= real_cap:
@@ -178,9 +191,10 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--per-generator", type=int, default=200, help="Max images kept per fake generator.")
     p.add_argument("--max-scan", type=int, default=60_000, help="Stop after streaming this many rows.")
-    p.add_argument("--min-scan", type=int, default=15_000,
+    p.add_argument("--min-scan", type=int, default=2_000,
                    help="Never early-stop before this many rows, so rare generators get a fair chance.")
-    p.add_argument("--shuffle-buffer", type=int, default=10_000)
+    p.add_argument("--shuffle-buffer", type=int, default=0,
+                   help="0 (default) disables streaming shuffle -- it blocks until its buffer fills.")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--force", action="store_true", help="Re-encode images already on disk.")
     a = p.parse_args()

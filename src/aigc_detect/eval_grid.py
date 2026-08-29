@@ -51,7 +51,7 @@ from sklearn.metrics import balanced_accuracy_score, roc_auc_score, roc_curve
 
 from aigc_detect.config import GENERATOR_FAMILY, RANDOM_SEED, ROOT_DIR, TRAIN_GENERATORS
 from aigc_detect.embed import fingerprint_paths
-from aigc_detect.embed_views import cache_stem, select_rows, view_embeddings_path, view_fingerprint
+from aigc_detect.embed_views import cache_stem, load_view_cache, select_rows, view_embeddings_path
 from aigc_detect.heads import build_head
 from aigc_detect.transforms import (
     build_robustness_views,
@@ -157,21 +157,9 @@ def evaluate_grid(
         if not path.exists():
             missing.append(name)
             continue
-        with np.load(path, allow_pickle=True) as d:
-            if str(d["manifest_fingerprint"]) != expected_m_fp:
-                raise SystemExit(
-                    f"[eval-grid] STALE: {path.name} was computed from a different row "
-                    f"selection than {manifest_path.name} yields now. Re-run embed-views."
-                )
-            if "view_fingerprint" not in d or str(d["view_fingerprint"]) != view_fingerprint(spec):
-                raise SystemExit(
-                    f"[eval-grid] STALE: {path.name} was computed under a different definition "
-                    f"of view '{name}' (spec is now {spec!r}). Re-run embed-views."
-                )
-            emb = d["embeddings"].astype(np.float32)
-            labels = d["labels"].astype(np.int64)
-            if generators is None and "generators" in d:
-                generators = d["generators"].astype(str)
+        emb, labels, meta = load_view_cache(backbone_key, stem, name, spec, expected_manifest_fp=expected_m_fp)
+        if generators is None and "generators" in meta:
+            generators = meta["generators"]
 
         if ref_labels is None:
             ref_labels = labels

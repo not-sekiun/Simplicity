@@ -14,7 +14,13 @@ Implements exactly the transform table from the challenge brief (5.2):
 Two pipelines are exposed:
 
   * ``build_train_transform``     — light standard aug + a stochastic mix of the
-    real-world degradations above, so the classifier learns to be robust to them.
+    real-world degradations above, applied to live pixels. NOT part of the
+    current training path: the classifier head trains on precomputed
+    embeddings (see train_head.py::train_head_on_views), never on live
+    pixels, so this pipeline's only caller is main.py's `preview-augment`
+    sanity-check command. Kept for a possible future pixel-space fine-tune.
+    Augmentation for the actual trained head instead comes from precomputed
+    degraded VIEWS cached by embed_views.py.
   * ``build_eval_transform``      — deterministic resize/normalize only ("clean").
   * ``build_robustness_eval_transforms`` — one deterministic pipeline *per*
     (transform, severity) combination in the table, plus "clean" and three
@@ -287,7 +293,14 @@ def make_color_jitter(strength: float = COLOR_JITTER_STRENGTH) -> v2.ColorJitter
 
 
 # ---------------------------------------------------------------------------
-# Stochastic compound augmentation used at TRAIN time.
+# Stochastic compound augmentation for LIVE-PIXEL pipelines.
+#
+# NOT currently in the training path -- the head trains on precomputed
+# embeddings (train_head.py::train_head_on_views), so its augmentation is
+# precomputed degraded VIEWS from embed_views.py, not this class run live.
+# The only current caller of build_train_transform (and therefore of this
+# class) is main.py::cmd_preview_augment, a sanity-check grid image. This is
+# kept for a possible future pixel-space fine-tune.
 # ---------------------------------------------------------------------------
 
 
@@ -300,6 +313,10 @@ class RobustnessAugment:
     This is deliberately compositional (e.g. resize + JPEG can co-occur, as
     they would for a re-uploaded, re-compressed thumbnail) so the model sees
     realistic combinations rather than only single isolated corruptions.
+
+    NOT part of the current training path (see the section header above):
+    changing ``max_ops`` or ``p_any`` has NO effect on the trained model,
+    only on the output of `preview-augment`.
     """
 
     p_any: float = 0.8
@@ -389,7 +406,13 @@ def build_train_transform(
     norm_mean: tuple[float, ...] = NORM_MEAN,
     norm_std: tuple[float, ...] = NORM_STD,
 ) -> v2.Compose:
-    """Training pipeline: standard light aug + stochastic real-world degradations.
+    """Live-pixel pipeline: standard light aug + stochastic real-world degradations.
+
+    NOT currently in the training path -- see the "Stochastic compound
+    augmentation for LIVE-PIXEL pipelines" section above and the module
+    docstring. The classifier head trains on precomputed embeddings, never on
+    live pixels via this function; its only current caller is main.py's
+    `preview-augment` command, which renders a sanity-check grid image.
 
     ``norm_mean``/``norm_std`` default to config's ImageNet stats but MUST be
     overridden with the backbone's own stats when feeding a frozen VFM -- see
