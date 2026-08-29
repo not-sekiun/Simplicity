@@ -12,6 +12,19 @@ PROCESSED_DIR = DATA_DIR / "processed"
 TRAIN_MANIFEST = PROCESSED_DIR / "train.csv"
 VAL_MANIFEST = PROCESSED_DIR / "val.csv"
 
+# Three-tier data separation:
+#   raw/      = training pool (scripts/make_splits.py globs ONLY this dir)
+#   heldout/  = untouched IN-DISTRIBUTION test set, NEVER trained on and NEVER
+#               globbed by make_splits.py. Currently Tiny-GenImage's own HF
+#               "validation" split. NOTE: this is NOT a cross-generator set --
+#               it contains the same 7 generators as the train split (ADM,
+#               BigGAN, GLIDE, Midjourney, SD15, VQDM, Wukong). For unseen-
+#               generator evaluation use `main.py split --holdout-generators`.
+#   demo_val/ = the challenge brief's external, self-reported benchmark (5.4),
+#               also never trained on -- see below
+HELDOUT_DIR = DATA_DIR / "heldout"
+HELDOUT_MANIFEST = HELDOUT_DIR / "heldout.csv"
+
 # Self-reported "demonstration purposes only" benchmark (challenge brief 5.4):
 # COCO val2017 (real) + WildFake "DALL·E Advanced" subset (AIGC). Kept under a
 # directory separate from RAW_DIR/PROCESSED_DIR on purpose — the brief says

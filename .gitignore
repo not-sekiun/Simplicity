@@ -13,10 +13,12 @@ wheels/
 data/raw/**
 data/processed/**
 data/demo_val/**
+data/heldout/**
 data/embeddings/**
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/demo_val/.gitkeep
+!data/heldout/.gitkeep
 *.png
 !docs/**/*.png
 checkpoints/
