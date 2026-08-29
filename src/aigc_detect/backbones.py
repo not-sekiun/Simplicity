@@ -49,6 +49,24 @@ BACKBONE_REGISTRY: dict[str, dict] = {
         "pooled_dim": 1024,
         "native_res": 336,
     },
+    # The variant the paper actually benchmarked as its robustness champion
+    # (MetaCLIP2 blur sigma=2.0: 0.932, improving, vs PE-CLIP's 0.778 collapse).
+    # We raced `metaclip2-h` instead because Giant's vision tower was ESTIMATED
+    # near the 2B cap -- this entry exists to replace that estimate with a
+    # measurement. Two things make it worth the check despite the cost:
+    #   1. It is the ONLY available candidate running ABOVE pe-core-l's 336px,
+    #      so it is the one test of the resolution hypothesis (NARRATIVE Run 7)
+    #      in the favourable direction. If resolution drives degraded-input
+    #      robustness, Giant should win; if it loses anyway, the hypothesis is
+    #      wrong and architecture/pretraining matter more.
+    #   2. We are using 316M of a 2B budget.
+    # NOTE: cc-by-nc-4.0 (non-commercial), unlike the other entries.
+    "metaclip2-giant": {
+        "checkpoint": "facebook/metaclip-2-worldwide-giant-378",
+        "loader": "transformers",
+        "pooled_dim": 1664,
+        "native_res": 378,
+    },
     "dinov2-g": {
         "checkpoint": "facebook/dinov2-giant",
         "loader": "transformers",
@@ -134,7 +152,11 @@ def load_backbone(key: str):
 
     if entry["loader"] == "timm":
         module, mean, std, norm_source, used_checkpoint = _load_timm_backbone(entry["checkpoint"])
-    elif key == "metaclip2-h":
+    elif key.startswith("metaclip2"):
+        # Family dispatch, not per-key: every MetaCLIP2 checkpoint loads through
+        # the same vision-tower class. Keying on the exact name meant adding a
+        # second MetaCLIP2 variant raised "No loader implemented", which reads
+        # like an unsupported architecture rather than a missing elif.
         try:
             from transformers import MetaClip2VisionModel
 
@@ -143,12 +165,15 @@ def load_backbone(key: str):
             )
             module = _PooledVisionWrapper(vision_model)
         except Exception as exc:
+            fallback = entry.get("fallback_timm")
+            if not fallback:
+                raise
             print(
                 f"[backbones] WARNING: transformers could not load the MetaCLIP2 vision "
                 f"tower from '{entry['checkpoint']}' ({type(exc).__name__}: {exc}); "
-                f"falling back to timm mirror '{entry['fallback_timm']}'"
+                f"falling back to timm mirror '{fallback}'"
             )
-            module, mean, std, norm_source, used_checkpoint = _load_timm_backbone(entry["fallback_timm"])
+            module, mean, std, norm_source, used_checkpoint = _load_timm_backbone(fallback)
             used_fallback = True
     elif key == "dinov2-g":
         from transformers import Dinov2Model
