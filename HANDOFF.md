@@ -1,9 +1,29 @@
-# Handoff — read the race results, then decide
+# Handoff — the race is DONE and decided; next is deliverable 5.5.5
 
-**Written 2026-08-29.** A backbone race was launched and is (or was) running in
-the background when this was written. **Your first job is to read its results
-and make one decision.** Everything you need is below; you should not have to
-re-derive anything.
+**Written 2026-08-29, updated after the race completed.**
+
+## THE RACE IS FINISHED AND THE DECISION IS MADE. Do not re-run it.
+
+`pe-core-l` won and ships. Both challengers lost decisively on `ood-s4000`,
+against a rule fixed before the numbers were seen (switch only on > +0.010):
+
+| backbone | res | params | ood SCORE | delta |
+|---|---|---|---|---|
+| **`pe-core-l`** | 336 | 316M | **0.9366** | — |
+| `dinov3-l` | 256 | 303M | 0.9041 | -0.0325 |
+| `metaclip2-h` | 224 | 630M | 0.8961 | -0.0405 |
+
+Same ordering on the in-scope diffusion-only metric (0.9466 / 0.9140 / 0.9143
+clean), on worst-case, and on val. Full write-up: `NARRATIVE.md` Run 7.
+
+**The shipping model is `models/pe-core-l__linear__augchain.pt`**, which is
+already `predict.py`'s default. `models/*__linear__race.pt` are the race
+artifacts; `pe-core-l__linear__race.pt` is equivalent to the shipping head
+(same config, same seed).
+
+**Your job now is section 3: deliverable 5.5.5 (error analysis), the last
+required piece.** Sections 1-2 below are retained as the record of how the
+decision was made -- read them only if you need to audit it.
 
 Read order: this file, then `NARRATIVE.md`'s "Comparability epochs" table
 (short, and it will stop you comparing numbers that are not comparable). Only
@@ -107,9 +127,9 @@ a prediction about these checkpoints.
 | 5.5.2 inference script | **DONE** — `predict.py --input_dir <dir> --output preds.json`, verified 10/10 on held-out rows |
 | 5.5.4 robustness summary | **DONE** — `main.py eval-grid`, 18 views, `reports/grid__*.csv` |
 | 5.5.5 error analysis | **NOT STARTED** — the last required piece |
-| Backbone race | running / see `race_status.json` |
+| Backbone race | **DONE** — `pe-core-l` wins; see the top of this file and NARRATIVE Run 7 |
 
-**After the race decision, 5.5.5 is the highest-value remaining work.** The
+**5.5.5 is now the highest-value remaining work.** The
 raw material already exists: `reports/race/*/grid_ood.csv` for per-view and
 per-generator failures, and `predict.py` to pull concrete false
 positives/negatives. The strongest findings to build it on:

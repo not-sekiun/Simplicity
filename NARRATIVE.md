@@ -437,6 +437,86 @@ Two things the full table shows that the summary above hides:
   JPEG on top made the input *easier*. Read a positive penalty only after
   checking the components are healthy.
 
+### Run 7 — the backbone race. **`pe-core-l` holds; both challengers lose.**
+
+Judged on `ood-s4000`, the only tier with range (0 of 18 views above 0.99,
+against 11 of 18 on val and 16 of 18 on demo-val). Decision rule fixed
+*before* the numbers were seen: switch only on > +0.010.
+
+Every backbone saw byte-identical rows, identical per-(image, view) transform
+seeds, and identical seeded head training. Results in
+`reports/race/race_status.json`.
+
+| backbone | res | params | ood clean | ood pooled | **ood SCORE** | ood worst | delta |
+|---|---|---|---|---|---|---|---|
+| **`pe-core-l`** | **336** | 316M | 0.9532 | 0.9200 | **0.9366** | 0.8099 | — |
+| `dinov3-l` | 256 | 303M | 0.9209 | 0.8873 | 0.9041 | 0.7965 | **-0.0325** |
+| `metaclip2-h` | 224 | 630M | 0.9307 | 0.8614 | 0.8961 | 0.7288 | **-0.0405** |
+
+The in-scope (diffusion-only) metric agrees, by a wider margin:
+
+| backbone | ood diffusion clean | ood diffusion degraded |
+|---|---|---|
+| **`pe-core-l`** | **0.9466** | **0.9148** |
+| `dinov3-l` | 0.9140 | 0.8729 |
+| `metaclip2-h` | 0.9143 | 0.8503 |
+
+**Verdict: keep `pe-core-l`.** Not close, and consistent across headline,
+diffusion-only, worst-case, and val.
+
+#### This contradicts the paper, and the pre-registered caveats explain why
+
+`arXiv:2602.01738` ranks in-the-wild DINOv3 0.940 > PE-CLIP 0.899 >
+MetaCLIP2 0.842, and under blur has MetaCLIP2 *improving* (0.932) where
+PE-CLIP collapses (0.778). We measured the reverse ordering. The caveats
+recorded in FINDINGS 2g *before* racing are the reason:
+
+- the paper's DINOv3 is **ViT-7B**, which violates the <2B rule; our
+  `dinov3-l` is ViT-L/303M — a different model sharing a family name;
+- its MetaCLIP2 is **Giant at 378px** (~1.8-1.9B vision tower, rejected at
+  ~95% of the cap); ours is Huge at **224px**;
+- it reports **no** Gaussian-noise robustness at all — and noise is where
+  MetaCLIP2-Huge fails worst here (`noise_sigma0.1` 0.7288 vs PE-Core's
+  0.8480, a 0.119 gap).
+
+So this is not a refutation of the paper. It is evidence that its family-level
+ranking does **not** transfer to the smaller, lower-resolution checkpoints the
+2B cap actually permits.
+
+#### Hypothesis: input resolution, not backbone family, drives degraded-input robustness
+
+The ood ordering is **monotone in native resolution** (336 > 256 > 224) and
+**inverse to parameter count** — metaclip2-h has twice PE-Core's parameters and
+finishes last. A supporting signal: the spread between backbones roughly
+doubles on hard views versus mild ones.
+
+```
+mean spread across backbones, MILD views (clean, jpeg_q90, blur_0.5, jitter)   0.0306
+mean spread across backbones, HARD views (noise_0.1, blur_2.0, resize_0.25x,
+                                          chain_medium, chain_heavy)           0.0643
+```
+
+Mechanism, if real: degradation destroys high-frequency content, and a 224px
+input has less of it to lose before the signal goes.
+
+**Treat this as a hypothesis, not a finding.** n=3 backbones, and resolution is
+confounded with architecture and pretraining corpus. It is also not clean
+per-view — `dinov3-l` actually *beats* `pe-core-l` on `blur_sigma2.0` (0.9132
+vs 0.9105), and `chain_heavy` is a three-way tie (0.8099 / 0.7965 / 0.7967).
+Testing it properly would mean running one backbone at two resolutions, which
+nothing here has done.
+
+#### What the race settles
+
+- PE-Core's 336px is an **asset**, not just a cost. It was the most expensive
+  to embed and it won.
+- The remaining headroom is not in the backbone. Both alternatives were worse
+  on every aggregate, so the next gains have to come from the head, the data,
+  or calibration.
+- `chain_heavy` is the worst view for **all three** backbones (0.7965-0.8099,
+  a three-way tie). Deep composition is a property of the task here, not of any
+  one representation.
+
 ---
 
 ## Scoreboard
@@ -466,8 +546,24 @@ Worst-case (`0.5*clean + 0.5*min per-view AUC`), the adversarial reading:
 | 5 | 0.9306 | `chain_heavy` |
 | **6 (seeded)** | **0.9551** | `chain_heavy` 0.9121 ~ `noise_sigma0.1` (tied) |
 
-Next: `chain_heavy` and `noise_sigma0.1` are jointly binding at ~0.91-0.92 and
-this benchmark cannot separate them (see the Run 6 correction). Both deep
-composition and heavy sensor noise remain open. Resolving which matters needs
-an evaluation set with more range -- hence the OOD tier -- not another run
-against val.
+### The OOD tier (Run 7's judge) and where things actually stand
+
+`ood-s4000` is the only eval set with range. Under the shipping head:
+
+| eval set | views >= 0.99 | range | score |
+|---|---|---|---|
+| val-s2000 | 11 / 18 | 0.9121-0.9988 | 0.9886 |
+| demo_val-s2000 | 16 / 18 | 0.9414-1.0000 | 0.9983 |
+| **ood-s4000** | **0 / 18** | **0.8099-0.9532** | **0.9366** |
+
+It also resolved the Run 6 ambiguity: on ood, `chain_heavy` (0.8099) is
+unambiguously the worst view with no tie to noise, and the composition penalty
+is cleanly monotone in depth (-0.0122 / -0.0500 / -0.0760). **Deep composition
+is the binding constraint**, and it binds for all three backbones.
+
+Next: the backbone lever is spent (Run 7) and the augmentation lever is spent
+(ceiling probe). Remaining work is deliverable 5.5.5 (error analysis), for
+which the strongest material is `DALLE2` -- clean 0.9278 -> degraded 0.8020,
+the one real in-scope failure -- and the finding that unseen *diffusion*
+generators (SD14 0.9579, SDXL 0.9554) beat trained ones (ADM 0.9208,
+Midjourney 0.9296).

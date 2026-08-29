@@ -71,11 +71,160 @@
       },
       "total_sec": 6.9,
       "status": "done"
+    },
+    "metaclip2-h": {
+      "embed_train_sec": 1406.6,
+      "embed_val_sec": 344.5,
+      "embed_ood_sec": 680.0,
+      "head": "C:\\Users\\angus\\Desktop\\tiktoktechjam2026\\models\\metaclip2-h__linear__race.pt",
+      "val": {
+        "auc_clean": 0.995119,
+        "auc_robust": {
+          "pooled": 0.9632743633217994,
+          "mean": 0.9630136764705881,
+          "worst": 0.841376
+        },
+        "score_pooled": 0.9791966816608997,
+        "score_worst": 0.9182475,
+        "worst_view": "noise_sigma0.1",
+        "threshold": 0.47166503965854645,
+        "per_view": {
+          "clean": 0.995119,
+          "jpeg_q90": 0.9979579999999999,
+          "jpeg_q70": 0.9992570000000001,
+          "jpeg_q50": 0.998111,
+          "jpeg_q30": 0.996879,
+          "blur_sigma0.5": 0.990202,
+          "blur_sigma1.0": 0.987969,
+          "blur_sigma2.0": 0.923125,
+          "resize_0.5x": 0.9821525,
+          "resize_0.25x": 0.9399069999999999,
+          "noise_sigma0.02": 0.9563189999999999,
+          "noise_sigma0.05": 0.919622,
+          "noise_sigma0.1": 0.841376,
+          "color_jitter": 0.9908669999999999,
+          "center_crop_80": 0.990444,
+          "chain_light": 0.998289,
+          "chain_medium": 0.870625,
+          "chain_heavy": 0.98813
+        },
+        "csv": "C:\\Users\\angus\\Desktop\\tiktoktechjam2026\\reports\\race\\metaclip2-h\\grid_val.csv"
+      },
+      "ood": {
+        "auc_clean": 0.9307038749999998,
+        "auc_robust": {
+          "pooled": 0.8614476570069204,
+          "mean": 0.8721369338235294,
+          "worst": 0.7288286249999999
+        },
+        "score_pooled": 0.8960757660034602,
+        "score_worst": 0.8297662499999998,
+        "worst_view": "noise_sigma0.1",
+        "threshold": 0.7225039601325989,
+        "per_view": {
+          "clean": 0.9307038749999998,
+          "jpeg_q90": 0.9235096250000001,
+          "jpeg_q70": 0.9258243749999999,
+          "jpeg_q50": 0.9160210000000001,
+          "jpeg_q30": 0.8971786249999999,
+          "blur_sigma0.5": 0.9278214999999999,
+          "blur_sigma1.0": 0.9086675000000001,
+          "blur_sigma2.0": 0.851837625,
+          "resize_0.5x": 0.8948,
+          "resize_0.25x": 0.846884375,
+          "noise_sigma0.02": 0.8755868749999999,
+          "noise_sigma0.05": 0.817143625,
+          "noise_sigma0.1": 0.7288286249999999,
+          "color_jitter": 0.9208177499999999,
+          "center_crop_80": 0.899275375,
+          "chain_light": 0.8842498750000001,
+          "chain_medium": 0.81113375,
+          "chain_heavy": 0.7967473750000001
+        },
+        "csv": "C:\\Users\\angus\\Desktop\\tiktoktechjam2026\\reports\\race\\metaclip2-h\\grid_ood.csv"
+      },
+      "total_sec": 2439.0,
+      "status": "done"
+    },
+    "dinov3-l": {
+      "embed_train_sec": 983.6,
+      "embed_val_sec": 244.6,
+      "embed_ood_sec": 409.7,
+      "head": "C:\\Users\\angus\\Desktop\\tiktoktechjam2026\\models\\dinov3-l__linear__race.pt",
+      "val": {
+        "auc_clean": 0.984369,
+        "auc_robust": {
+          "pooled": 0.9620965830449827,
+          "mean": 0.9619079117647059,
+          "worst": 0.8873749999999999
+        },
+        "score_pooled": 0.9732327915224914,
+        "score_worst": 0.935872,
+        "worst_view": "chain_heavy",
+        "threshold": 0.48400169610977173,
+        "per_view": {
+          "clean": 0.984369,
+          "jpeg_q90": 0.9828119999999999,
+          "jpeg_q70": 0.9786560000000001,
+          "jpeg_q50": 0.9738079999999999,
+          "jpeg_q30": 0.967888,
+          "blur_sigma0.5": 0.984097,
+          "blur_sigma1.0": 0.982704,
+          "blur_sigma2.0": 0.970213,
+          "resize_0.5x": 0.9782664999999999,
+          "resize_0.25x": 0.942535,
+          "noise_sigma0.02": 0.9670569999999999,
+          "noise_sigma0.05": 0.950323,
+          "noise_sigma0.1": 0.922795,
+          "color_jitter": 0.984361,
+          "center_crop_80": 0.9774780000000001,
+          "chain_light": 0.964451,
+          "chain_medium": 0.937615,
+          "chain_heavy": 0.8873749999999999
+        },
+        "csv": "C:\\Users\\angus\\Desktop\\tiktoktechjam2026\\reports\\race\\dinov3-l\\grid_val.csv"
+      },
+      "ood": {
+        "auc_clean": 0.92091725,
+        "auc_robust": {
+          "pooled": 0.8873012006920414,
+          "mean": 0.8878588602941175,
+          "worst": 0.7965085
+        },
+        "score_pooled": 0.9041092253460208,
+        "score_worst": 0.8587128749999999,
+        "worst_view": "chain_heavy",
+        "threshold": 0.5327088832855225,
+        "per_view": {
+          "clean": 0.92091725,
+          "jpeg_q90": 0.914544625,
+          "jpeg_q70": 0.89631325,
+          "jpeg_q50": 0.8876047499999999,
+          "jpeg_q30": 0.8743135,
+          "blur_sigma0.5": 0.9217438750000001,
+          "blur_sigma1.0": 0.9197415000000001,
+          "blur_sigma2.0": 0.913169125,
+          "resize_0.5x": 0.9114882499999999,
+          "resize_0.25x": 0.8753350000000001,
+          "noise_sigma0.02": 0.89278475,
+          "noise_sigma0.05": 0.8712399999999999,
+          "noise_sigma0.1": 0.84057575,
+          "color_jitter": 0.920454,
+          "center_crop_80": 0.913806,
+          "chain_light": 0.8827417500000001,
+          "chain_medium": 0.861236,
+          "chain_heavy": 0.7965085
+        },
+        "csv": "C:\\Users\\angus\\Desktop\\tiktoktechjam2026\\reports\\race\\dinov3-l\\grid_ood.csv"
+      },
+      "total_sec": 1644.8,
+      "status": "done"
     }
   },
   "backbone_order": [
-    "pe-core-l"
+    "metaclip2-h",
+    "dinov3-l"
   ],
-  "updated": "2026-08-29T13:58:11.434053+00:00",
-  "finished": "2026-08-29T13:58:11.433045+00:00"
+  "updated": "2026-08-29T15:06:26.486242+00:00",
+  "finished": "2026-08-29T15:06:26.486242+00:00"
 }
