@@ -356,6 +356,24 @@ The binding constraint moved to `noise_sigma0.1` (0.9179), a held-out
 severity. Heavy sensor noise is now the weakest axis; that is the next thing
 to attack, not composition.
 
+**Full per-view tables for both evaluation sets — all 18 scored views, AUC /
+BAcc@t / BAcc@0.5 / TPR / FPR, with the trained-vs-held-out marking and the
+per-view progression across all three heads — are in FINDINGS.md section 2f.**
+Machine-readable per-view CSVs are in `reports/`.
+
+Two things the full table shows that the summary above hides:
+
+- **Held-out severities gain *more* than their trained siblings.**
+  `blur_sigma1.0` (trained) +0.0432 vs `blur_sigma2.0` (held out) **+0.0978**;
+  `resize_0.5x` (trained) +0.0260 vs `resize_0.25x` (held out) **+0.0562**,
+  measured against the clean-only control. Memorization would produce the
+  opposite ordering.
+- **A positive composition penalty is not automatically good.** The clean-only
+  control also shows `chain_light` at +0.0114 — but only because its
+  `resize_0.5x` component was itself broken (AUC 0.9661, FPR 0.90), so adding
+  JPEG on top made the input *easier*. Read a positive penalty only after
+  checking the components are healthy.
+
 ---
 
 ## Scoreboard

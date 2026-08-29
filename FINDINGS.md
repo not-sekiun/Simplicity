@@ -465,6 +465,147 @@ is supposed to buy.
 
 ---
 
+## 2f. Run 6 full grid — chain-augmented head, all 18 scored views
+
+`models/pe-core-l__linear__augchain.pt`. Trained on 6,000 images x 11 views
+(`TRAIN_VIEWS_DEFAULT` + the four `trainchain_*` compositions). The three
+scored chains and eight of the fourteen single-transform severities were
+**never seen in training**, and are marked below.
+
+Each head gets its own operating threshold, chosen on its own clean view and
+then frozen across all 18 views (trap 15). `BAcc@t` uses that threshold;
+`BAcc@0.5` is shown alongside for reference. Thresholds: val **0.4117**,
+demo-val **0.2389**.
+
+Reproduce: `uv run main.py eval-grid --backbone pe-core-l --manifest {val,demo-val}
+--sample-rows 2000 --head models/pe-core-l__linear__augchain.pt`
+
+### val-s2000 — Tiny-GenImage, IN-DISTRIBUTION
+
+1,000 real / 1,000 AIGC across 7 generators (GLIDE 167, BigGAN 164, ADM 146, Wukong 140, Midjourney 137, SD15 125, VQDM 121). Same generators and same real source as train.
+
+| view | in training? | AUC | BAcc@t | BAcc@0.5 | TPR | FPR |
+|---|---|---|---|---|---|---|
+| `clean` | n/a (baseline) | 0.9981 | 0.9770 | 0.9760 | 0.9710 | 0.0170 |
+| `jpeg_q90` | **held out** | 0.9987 | 0.9755 | 0.9730 | 0.9600 | 0.0090 |
+| `jpeg_q70` | trained | 0.9987 | 0.9850 | 0.9835 | 0.9860 | 0.0160 |
+| `jpeg_q50` | **held out** | 0.9966 | 0.9600 | 0.9565 | 0.9330 | 0.0130 |
+| `jpeg_q30` | **held out** | 0.9918 | 0.9095 | 0.9010 | 0.8280 | 0.0090 |
+| `blur_sigma0.5` | **held out** | 0.9971 | 0.9725 | 0.9740 | 0.9760 | 0.0310 |
+| `blur_sigma1.0` | trained | 0.9929 | 0.9630 | 0.9645 | 0.9760 | 0.0500 |
+| `blur_sigma2.0` | **held out** | 0.9646 | 0.8675 | 0.8865 | 0.9650 | 0.2300 |
+| `resize_0.5x` | trained | 0.9920 | 0.9535 | 0.9585 | 0.9790 | 0.0720 |
+| `resize_0.25x` | **held out** | 0.9546 | 0.8795 | 0.8850 | 0.9200 | 0.1610 |
+| `noise_sigma0.02` | **held out** | 0.9791 | 0.9105 | 0.9190 | 0.9610 | 0.1400 |
+| `noise_sigma0.05` | trained | 0.9597 | 0.8955 | 0.9000 | 0.9210 | 0.1300 |
+| `noise_sigma0.1` | **held out** | 0.9179 | 0.8445 | 0.8455 | 0.9060 | 0.2170 |
+| `color_jitter` | trained | 0.9969 | 0.9755 | 0.9705 | 0.9700 | 0.0190 |
+| `center_crop_80` | trained | 0.9970 | 0.9725 | 0.9680 | 0.9600 | 0.0150 |
+| `chain_light` *(chain)* | **held out** | 0.9952 | 0.9665 | 0.9675 | 0.9790 | 0.0460 |
+| `chain_medium` *(chain)* | **held out** | 0.9591 | 0.8775 | 0.8655 | 0.8000 | 0.0450 |
+| `chain_heavy` *(chain)* | **held out** | 0.9182 | 0.8455 | 0.8440 | 0.8760 | 0.1850 |
+
+Summary: AUC_clean 0.9981 | AUC_robust pooled **0.9803** / mean 0.9771 / worst 0.9179
+| score 0.5*clean+0.5*pooled = **0.9892**, worst-case = **0.9580**
+| robustness gap AUC 0.0210, BAcc@t 0.0503.
+
+### demo_val-s2000 — COCO val2017 + WildFake DALL-E Advanced, EXTERNAL
+
+1,000 COCO reals / 1,000 WildFake DALL-E AIGC. Never trained on (brief 5.4). Doubles as an unseen-generator AND unseen-real-source test: DALL-E is not among the 7 training generators and COCO is not the training real source.
+
+| view | in training? | AUC | BAcc@t | BAcc@0.5 | TPR | FPR |
+|---|---|---|---|---|---|---|
+| `clean` | n/a (baseline) | 0.9998 | 0.9920 | 0.9945 | 0.9980 | 0.0140 |
+| `jpeg_q90` | **held out** | 1.0000 | 0.9980 | 0.9985 | 0.9980 | 0.0020 |
+| `jpeg_q70` | trained | 0.9998 | 0.9910 | 0.9950 | 0.9970 | 0.0150 |
+| `jpeg_q50` | **held out** | 0.9999 | 0.9950 | 0.9975 | 0.9990 | 0.0090 |
+| `jpeg_q30` | **held out** | 0.9999 | 0.9980 | 0.9950 | 0.9980 | 0.0020 |
+| `blur_sigma0.5` | **held out** | 0.9997 | 0.9880 | 0.9940 | 0.9980 | 0.0220 |
+| `blur_sigma1.0` | trained | 0.9990 | 0.9695 | 0.9855 | 0.9980 | 0.0590 |
+| `blur_sigma2.0` | **held out** | 0.9951 | 0.9170 | 0.9555 | 0.9920 | 0.1580 |
+| `resize_0.5x` | trained | 0.9989 | 0.9740 | 0.9870 | 0.9960 | 0.0480 |
+| `resize_0.25x` | **held out** | 0.9958 | 0.9425 | 0.9675 | 0.9900 | 0.1050 |
+| `noise_sigma0.02` | **held out** | 0.9943 | 0.9465 | 0.9630 | 0.9840 | 0.0910 |
+| `noise_sigma0.05` | trained | 0.9789 | 0.9145 | 0.9265 | 0.9550 | 0.1260 |
+| `noise_sigma0.1` | **held out** | 0.9470 | 0.8605 | 0.8800 | 0.9280 | 0.2070 |
+| `color_jitter` | trained | 0.9997 | 0.9890 | 0.9940 | 0.9980 | 0.0200 |
+| `center_crop_80` | trained | 0.9998 | 0.9935 | 0.9935 | 0.9970 | 0.0100 |
+| `chain_light` *(chain)* | **held out** | 0.9996 | 0.9800 | 0.9900 | 0.9980 | 0.0380 |
+| `chain_medium` *(chain)* | **held out** | 0.9993 | 0.9815 | 0.9870 | 0.9940 | 0.0310 |
+| `chain_heavy` *(chain)* | **held out** | 0.9946 | 0.9175 | 0.9490 | 0.9880 | 0.1530 |
+
+Summary: AUC_clean 0.9998 | AUC_robust pooled **0.9970** / mean 0.9942 / worst 0.9470
+| score 0.5*clean+0.5*pooled = **0.9984**, worst-case = **0.9734**
+| robustness gap AUC 0.0056, BAcc@t 0.0299.
+
+### Per-view AUC progression on val-s2000
+
+All three heads trained on the **same 6,000 images**, so the only variable is
+which views they saw. This is the controlled comparison; Run 4's head used
+23,800 clean rows and is not a valid control for it.
+
+| view | in training? | Run 5 control<br>clean-only | Run 5<br>augmented | Run 6<br>+chains | Run 6 vs control |
+|---|---|---|---|---|---|
+| `clean` | n/a (baseline) | 0.9987 | 0.9985 | 0.9981 | -0.0006 |
+| `jpeg_q90` | **held out** | 0.9974 | 0.9984 | 0.9987 | +0.0013 |
+| `jpeg_q70` | trained | 0.9965 | 0.9982 | 0.9987 | +0.0023 |
+| `jpeg_q50` | **held out** | 0.9936 | 0.9958 | 0.9966 | +0.0030 |
+| `jpeg_q30` | **held out** | 0.9886 | 0.9906 | 0.9918 | +0.0032 |
+| `blur_sigma0.5` | **held out** | 0.9973 | 0.9977 | 0.9971 | -0.0002 |
+| `blur_sigma1.0` | trained | 0.9498 | 0.9922 | 0.9929 | +0.0432 |
+| `blur_sigma2.0` | **held out** | 0.8668 | 0.9584 | 0.9646 | +0.0978 |
+| `resize_0.5x` | trained | 0.9661 | 0.9907 | 0.9920 | +0.0260 |
+| `resize_0.25x` | **held out** | 0.8984 | 0.9486 | 0.9546 | +0.0562 |
+| `noise_sigma0.02` | **held out** | 0.9630 | 0.9776 | 0.9791 | +0.0161 |
+| `noise_sigma0.05` | trained | 0.9334 | 0.9575 | 0.9597 | +0.0263 |
+| `noise_sigma0.1` | **held out** | 0.8803 | 0.9119 | 0.9179 | +0.0377 |
+| `color_jitter` | trained | 0.9972 | 0.9975 | 0.9969 | -0.0003 |
+| `center_crop_80` | trained | 0.9976 | 0.9972 | 0.9970 | -0.0006 |
+| `chain_light` *(chain)* | **held out** | 0.9775 | 0.9880 | 0.9952 | +0.0177 |
+| `chain_medium` *(chain)* | **held out** | 0.9268 | 0.9435 | 0.9591 | +0.0323 |
+| `chain_heavy` *(chain)* | **held out** | 0.8265 | 0.8627 | 0.9182 | +0.0917 |
+
+Reading it:
+
+- **Clean is untouched** (0.9987 -> 0.9981). Robustness was not bought with
+  clean accuracy.
+- **The worst rows improve most.** `blur_sigma2.0` +0.0978 and `chain_heavy`
+  +0.0917 — both held out.
+- **Held-out severities track their trained siblings.** `blur_sigma1.0`
+  (trained) +0.0432 and `blur_sigma2.0` (held out) +0.0978; `resize_0.5x`
+  (trained) +0.0260 and `resize_0.25x` (held out) +0.0562. The unseen, harsher
+  severity gains *more* than the trained one, which is the opposite of what
+  memorization would produce.
+- **Chains only move once chains are trained on.** Run 5 gave `chain_heavy`
+  +0.0362; Run 6 added a further +0.0555. Composition is a separate axis from
+  severity and had to be trained separately.
+- **The rows that barely move were already saturated** (`color_jitter`,
+  `center_crop_80`, `blur_sigma0.5`, all >0.997 from the start).
+
+### Composition penalty — chain AUC minus its own weakest component's AUC
+
+The primary composition diagnostic. The chained-mean-minus-single-mean delta
+conflates depth with severity choice, since the single-view mean averages in
+`jpeg_q90` and `blur_sigma0.5` at ~0.998. Comparing a chain to its own parts
+holds severity fixed by construction, so what remains is the cost of composing.
+
+| chain | components | Run 5 control | Run 5 aug | Run 6 +chains |
+|---|---|---|---|---|
+| `chain_light` | `resize_0.5x`, `jpeg_q70` | +0.0114 (vs `resize_0.5x`) | -0.0027 (vs `resize_0.5x`) | +0.0031 (vs `resize_0.5x`) |
+| `chain_medium` | `center_crop_80`, `color_jitter`, `resize_0.5x`, `jpeg_q50` | -0.0393 (vs `resize_0.5x`) | -0.0473 (vs `resize_0.5x`) | -0.0329 (vs `resize_0.5x`) |
+| `chain_heavy` | `blur_sigma1.0`, `resize_0.25x`, `noise_sigma0.05`, `jpeg_q30` | -0.0719 (vs `resize_0.25x`) | -0.0860 (vs `resize_0.25x`) | -0.0364 (vs `resize_0.25x`) |
+
+`chain_heavy`'s penalty more than halves (-0.0860 -> -0.0364) and
+`chain_light`'s goes positive. Note the control's `chain_light` penalty was
+*also* positive (+0.0114) — at that point `resize_0.5x` was itself so broken
+(0.9661, FPR 0.90) that adding JPEG on top made the input easier, not harder.
+A positive penalty is only good news when the components are healthy.
+
+**Binding constraint is now `noise_sigma0.1` (0.9179), a held-out severity,**
+not a chain. Heavy sensor noise is the next axis to attack.
+
+---
+
 ## 3. What was built
 
 ### Wave 1
