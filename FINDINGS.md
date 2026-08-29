@@ -489,6 +489,14 @@ the **same dataset family the paper trains on**.
       loop and a per-view embedding cache (which must carry a manifest
       fingerprint — see trap 7). Settles section 2c's open hypothesis about the
       "generated at 256x256" signal degrading under resize 0.5x/0.25x.
+      **Prerequisite fixes landed 2026-08-29 — see traps 8, 9, 10.** The grid
+      was unusable as written: its noise views destroyed 84.5% of every image,
+      it normalized with the wrong constants, and two of its views were
+      nondeterministic. No grid number produced before those fixes is valid.
+      `AUC_robust` is still undefined by us; decide between pooled (one AUC over
+      all degraded views mixed — penalizes score-scale drift across views),
+      mean-of-per-view-AUCs, and worst-case view. Recommendation on record:
+      **pooled as primary, report all three.**
 - [ ] `predict.py --input_dir <dir> --output preds.json` emitting
       `[{"image_path": ..., "pred": <float 0-1>}, ...]` — required deliverable,
       not started.
@@ -572,3 +580,80 @@ the **same dataset family the paper trains on**.
    name rather than on contents produces confident wrong answers instead of
    visible failures.** Anything else that caches per-manifest (future robustness
    grids, per-view embedding caches) needs the same fingerprint.
+
+8. **The robustness eval grid was destroying its own noise views. FIXED
+   2026-08-29.** `build_robustness_eval_transforms()` composed the noise views
+   as `[resize, ToImage, ToDtype, Normalize, noise]` -- noise *after*
+   normalization. `GaussianNoiseLevels` ends in `.clamp(0.0, 1.0)`, a
+   valid-pixel guard that is correct in the [0, 1] domain and catastrophic
+   outside it.
+
+   After `Normalize`, 0 no longer means "black" -- it means "exactly the
+   channel mean". Solving `0 <= (x - mean)/std <= 1` for the original pixel
+   value gives the only band the clamp preserves:
+
+   ```
+   ch0: clamp window [0,1] == pixels [0.485, 0.714]
+   ch1: clamp window [0,1] == pixels [0.456, 0.680]
+   ch2: clamp window [0,1] == pixels [0.406, 0.631]
+   ```
+
+   Everything darker than the channel mean was floored to a single flat value;
+   everything brighter than mean+std was saturated to another. Measured on a
+   real val image at sigma=0.02, the *gentlest* level in the brief's table:
+
+   ```
+   floored to 0 (darker than channel mean)  24.5%
+   saturated to 1 (brighter than mean+std)  60.0%
+   total destroyed by the clamp             84.5%
+   mean|noised - clean|   OLD 0.6925  ->  NEW 0.0705
+   ```
+
+   The damage is independent of sigma -- it happens at sigma -> 0 too, so the
+   noise views were not measuring noise at all. A second, smaller error was
+   stacked on top: the brief's sigmas (0.02/0.05/0.10) are fractions of the
+   pixel range, but applied post-Normalize they were interpreted in normalized
+   units (span ~4.4), making the intended perturbation ~4x too weak.
+
+   Nothing throws. The tensor keeps its shape, dtype, and a plausible-looking
+   range. This would have produced three catastrophic `noise_sigma*` rows,
+   supported the conclusion "PE-Core has a severe sensor-noise weakness", and
+   sent a whole session engineering against a defect living entirely in the
+   eval harness. **The train pipeline had it right all along**
+   (`build_train_transform` applies noise before `Normalize`); only the eval
+   grid was inverted, which is the more dangerous half to get wrong.
+
+   Fixed by splitting the tail into `to_tensor` / `normalize` and composing the
+   noise views as `[resize, *to_tensor, noise, *normalize]`. Verified: the
+   fixed views now scale linearly with sigma and match theory exactly (mean
+   absolute deviation of a Gaussian is `sigma*sqrt(2/pi)`; at sigma=0.02 under
+   0.5/0.5 normalization that predicts 0.0319, measured 0.0318).
+
+   ```
+   noise_sigma0.02  mean|d|=0.0318
+   noise_sigma0.05  mean|d|=0.0780
+   noise_sigma0.1   mean|d|=0.1496
+   ```
+
+9. **Normalization stats must come from the backbone, not `config.py`. FIXED
+   2026-08-29.** The grid builders hardcoded `config.NORM_MEAN/NORM_STD`
+   (ImageNet), while `embed.py` normalizes with `module.norm_mean` /
+   `module.norm_std` -- each backbone's own (PE-Core is 0.5/0.5, MetaCLIP2 uses
+   OpenAI-CLIP stats). Feeding grid tensors to a backbone would have evaluated
+   every view under normalization the model was never trained with, and the
+   grid's `clean` view would have silently disagreed with the already-cached
+   clean embeddings it is supposed to reproduce.
+
+   All three builders now take `norm_mean`/`norm_std`, defaulting to config so
+   existing callers (`audit_data.py`) are unaffected. **Any new caller feeding
+   a frozen VFM must pass the backbone's stats and its native resolution** --
+   the `image_size` default is 224, but PE-Core wants 336.
+
+10. **Neither `color_jitter` nor the noise views are deterministic by
+    default.** `v2.ColorJitter` samples fresh brightness/contrast/saturation
+    factors on every call, and `GaussianNoiseLevels` draws from the global
+    torch RNG. For a *cached* eval view that is a correctness problem, not a
+    cosmetic one: re-running the grid would score a different set of images,
+    so two backbones raced against each other would not face the same test.
+    `embed_views.py` seeds per `(row index, view name)` to make every view
+    byte-reproducible across runs, workers, and backbones.

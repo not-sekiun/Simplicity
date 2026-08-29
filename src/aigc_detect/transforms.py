@@ -217,8 +217,18 @@ def build_backbone_transform(image_size: int = IMAGE_SIZE) -> list:
     ]
 
 
-def build_train_transform(image_size: int = IMAGE_SIZE, robustness_p: float = 0.8) -> v2.Compose:
-    """Training pipeline: standard light aug + stochastic real-world degradations."""
+def build_train_transform(
+    image_size: int = IMAGE_SIZE,
+    robustness_p: float = 0.8,
+    norm_mean: tuple[float, ...] = NORM_MEAN,
+    norm_std: tuple[float, ...] = NORM_STD,
+) -> v2.Compose:
+    """Training pipeline: standard light aug + stochastic real-world degradations.
+
+    ``norm_mean``/``norm_std`` default to config's ImageNet stats but MUST be
+    overridden with the backbone's own stats when feeding a frozen VFM -- see
+    build_robustness_eval_transforms' docstring.
+    """
     aug = RobustnessAugment(p_any=robustness_p)
     return v2.Compose(
         [
@@ -228,13 +238,17 @@ def build_train_transform(image_size: int = IMAGE_SIZE, robustness_p: float = 0.
             v2.RandomCrop(image_size, pad_if_needed=True),  # crop diversity at train time
             v2.ToImage(),
             v2.ToDtype(torch.float32, scale=True),
-            _MaybeNoise(aug.noise, p=robustness_p * 0.5),
-            v2.Normalize(mean=NORM_MEAN, std=NORM_STD),
+            _MaybeNoise(aug.noise, p=robustness_p * 0.5),  # [0,1] domain -- BEFORE Normalize
+            v2.Normalize(mean=norm_mean, std=norm_std),
         ]
     )
 
 
-def build_eval_transform(image_size: int = IMAGE_SIZE) -> v2.Compose:
+def build_eval_transform(
+    image_size: int = IMAGE_SIZE,
+    norm_mean: tuple[float, ...] = NORM_MEAN,
+    norm_std: tuple[float, ...] = NORM_STD,
+) -> v2.Compose:
     """Deterministic "clean" pipeline: aspect-preserving resize + center crop +
     normalize. Used for local validation accuracy and as the baseline row of
     the robustness summary."""
@@ -243,19 +257,42 @@ def build_eval_transform(image_size: int = IMAGE_SIZE) -> v2.Compose:
             *build_backbone_transform(image_size),
             v2.ToImage(),
             v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(mean=NORM_MEAN, std=NORM_STD),
+            v2.Normalize(mean=norm_mean, std=norm_std),
         ]
     )
 
 
-def build_robustness_eval_transforms(image_size: int = IMAGE_SIZE) -> dict[str, v2.Compose]:
+def build_robustness_eval_transforms(
+    image_size: int = IMAGE_SIZE,
+    norm_mean: tuple[float, ...] = NORM_MEAN,
+    norm_std: tuple[float, ...] = NORM_STD,
+) -> dict[str, v2.Compose]:
     """One deterministic pipeline per (transform, severity) in the table, plus
     "clean". Keys are stable, human-readable names, e.g. "jpeg_q50",
     "blur_sigma1.0", "resize_0.25x", "noise_sigma0.05", "color_jitter",
     "center_crop_80". Use these to build separate eval DataLoaders and report
     clean-vs-transformed accuracy per 5.5.4 (Robustness Evaluation Summary).
+
+    Two things here are easy to get wrong and are silent when wrong:
+
+    1. **Noise must be added in the [0, 1] domain, before Normalize.** The
+       brief's sigmas (0.02/0.05/0.10) are fractions of the pixel range, and
+       ``GaussianNoiseLevels`` clamps to [0, 1] as a valid-pixel guard. Run
+       after Normalize, that clamp instead floors every value below the channel
+       mean and saturates everything above mean+std -- destroying the image
+       rather than perturbing it, at *any* sigma. Keep noise between ToDtype
+       and Normalize.
+    2. **norm_mean/norm_std must match the backbone.** These default to
+       config's ImageNet stats, but the frozen VFMs use their own (PE-Core is
+       0.5/0.5, MetaCLIP2 uses OpenAI-CLIP stats) -- ``embed.py`` normalizes
+       with ``module.norm_mean``/``module.norm_std``. Pass the backbone's stats
+       here too, or every view is evaluated under normalization the model was
+       never trained with and the "clean" view silently disagrees with the
+       existing cached clean embeddings.
     """
-    base_post = [v2.ToImage(), v2.ToDtype(torch.float32, scale=True), v2.Normalize(mean=NORM_MEAN, std=NORM_STD)]
+    to_tensor = [v2.ToImage(), v2.ToDtype(torch.float32, scale=True)]  # -> float in [0, 1]
+    normalize = [v2.Normalize(mean=norm_mean, std=norm_std)]
+    base_post = [*to_tensor, *normalize]
     resize_step = v2.Compose(build_backbone_transform(image_size))  # shortest-side resize + center crop
 
     pipelines: dict[str, v2.Compose] = {
@@ -280,10 +317,12 @@ def build_robustness_eval_transforms(image_size: int = IMAGE_SIZE) -> dict[str, 
             [v2.Lambda(lambda img, s=s: resize_rt(img, scale=s)), resize_step, *base_post]
         )
 
+    # Noise is the one tensor-domain transform: applied to the [0, 1] tensor and
+    # normalized afterwards (see note 1 above -- the ordering is load-bearing).
     noise = GaussianNoiseLevels()
     for s in NOISE_SIGMAS:
         pipelines[f"noise_sigma{s}"] = v2.Compose(
-            [resize_step, *base_post, v2.Lambda(lambda t, s=s: noise(t, sigma=s))]
+            [resize_step, *to_tensor, v2.Lambda(lambda t, s=s: noise(t, sigma=s)), *normalize]
         )
 
     pipelines["color_jitter"] = v2.Compose([make_color_jitter(), resize_step, *base_post])
