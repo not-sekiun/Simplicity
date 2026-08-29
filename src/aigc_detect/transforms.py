@@ -184,6 +184,25 @@ class RobustnessAugment:
         return tensor
 
 
+class FixedSeverity:
+    """Binds one severity to one of the transform callables above.
+
+    Exists because ``v2.Lambda(lambda img: op(img, sigma=s))`` is NOT picklable,
+    and Windows' DataLoader uses the spawn start method, which pickles the
+    dataset (and therefore its transforms) to send to each worker. With lambdas
+    the robustness grid dies with "Can't pickle local object" the moment
+    num_workers > 0 -- i.e. exactly when it matters, since the per-view embedder
+    is decode-bound. A module-level class with plain attributes pickles fine.
+    """
+
+    def __init__(self, op, **kwargs):
+        self.op = op
+        self.kwargs = kwargs
+
+    def __call__(self, x):
+        return self.op(x, **self.kwargs)
+
+
 class _MaybeNoise:
     """Wraps GaussianNoiseLevels with an application probability, for use inside
     a v2.Compose tensor stage."""
@@ -299,22 +318,24 @@ def build_robustness_eval_transforms(
         "clean": v2.Compose([resize_step, *base_post]),
     }
 
+    # FixedSeverity rather than v2.Lambda(lambda ...) throughout: these pipelines
+    # get pickled to DataLoader workers under Windows' spawn start method.
     jpeg = JPEGCompression()
     for q in JPEG_QUALITIES:
         pipelines[f"jpeg_q{q}"] = v2.Compose(
-            [v2.Lambda(lambda img, q=q: jpeg(img, quality=q)), resize_step, *base_post]
+            [FixedSeverity(jpeg, quality=q), resize_step, *base_post]
         )
 
     blur = GaussianBlurLevels()
     for s in BLUR_SIGMAS:
         pipelines[f"blur_sigma{s}"] = v2.Compose(
-            [v2.Lambda(lambda img, s=s: blur(img, sigma=s)), resize_step, *base_post]
+            [FixedSeverity(blur, sigma=s), resize_step, *base_post]
         )
 
     resize_rt = ResizeRoundTrip()
     for s in RESIZE_SCALES:
         pipelines[f"resize_{s}x"] = v2.Compose(
-            [v2.Lambda(lambda img, s=s: resize_rt(img, scale=s)), resize_step, *base_post]
+            [FixedSeverity(resize_rt, scale=s), resize_step, *base_post]
         )
 
     # Noise is the one tensor-domain transform: applied to the [0, 1] tensor and
@@ -322,7 +343,7 @@ def build_robustness_eval_transforms(
     noise = GaussianNoiseLevels()
     for s in NOISE_SIGMAS:
         pipelines[f"noise_sigma{s}"] = v2.Compose(
-            [resize_step, *to_tensor, v2.Lambda(lambda t, s=s: noise(t, sigma=s)), *normalize]
+            [resize_step, *to_tensor, FixedSeverity(noise, sigma=s), *normalize]
         )
 
     pipelines["color_jitter"] = v2.Compose([make_color_jitter(), resize_step, *base_post])

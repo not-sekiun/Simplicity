@@ -40,6 +40,13 @@ Subcommands:
                                       under data/embeddings/. Implements the "Simplicity
                                       Prevails" (arXiv:2602.01738) preprocessing recipe.
                                       demo-val is EVALUATION ONLY (see 5.4).
+    embed-views --backbone KEY --manifest {train,val,heldout,demo-val}
+                [--views V ...] [--force] [--limit N]
+                                      Same, but for all 15 robustness views of the
+                                      5.2 table (clean + 14 degradations). One decode
+                                      per image feeds every view. Caches to
+                                      <backbone>__<manifest>__<view>.npz. This is the
+                                      instrument for the AUC_robust half of the score.
     train-head --backbone KEY [--head linear|mlp] [--epochs E] [--lr LR]
                [--batch-size B]
                                       Train a classifier head on cached embeddings for
@@ -218,22 +225,30 @@ def cmd_list_backbones(_args):
         )
 
 
-def cmd_embed(args):
-    from aigc_detect.embed import precompute_embeddings
+def _resolve_manifest(name: str):
+    """Map a --manifest choice to its path, exiting with a hint if it's missing.
 
-    # demo-val is embeddable for EVALUATION ONLY (brief 5.4 forbids training on
-    # it). train_head never looks at it -- it hardcodes TRAIN_MANIFEST/VAL_MANIFEST.
+    demo-val is embeddable for EVALUATION ONLY (brief 5.4 forbids training on
+    it). train_head never looks at it -- it hardcodes TRAIN_MANIFEST/VAL_MANIFEST.
+    """
     manifests = {
         "train": TRAIN_MANIFEST,
         "val": VAL_MANIFEST,
         "heldout": HELDOUT_MANIFEST,
         "demo-val": DEMO_VAL_MANIFEST,
     }
-    manifest = manifests[args.manifest]
+    manifest = manifests[name]
     if not manifest.exists():
-        hint = {"demo-val": "build-demo-val", "heldout": "build-heldout"}.get(args.manifest, "split")
-        print(f"No {args.manifest} manifest at {manifest}. Run `main.py {hint}` first.")
+        hint = {"demo-val": "build-demo-val", "heldout": "build-heldout"}.get(name, "split")
+        print(f"No {name} manifest at {manifest}. Run `main.py {hint}` first.")
         sys.exit(1)
+    return manifest
+
+
+def cmd_embed(args):
+    from aigc_detect.embed import precompute_embeddings
+
+    manifest = _resolve_manifest(args.manifest)
 
     precompute_embeddings(
         manifest_path=manifest,
@@ -242,6 +257,22 @@ def cmd_embed(args):
         num_workers=args.num_workers,
         force=args.force,
         limit=args.limit,
+    )
+
+
+def cmd_embed_views(args):
+    from aigc_detect.embed_views import precompute_view_embeddings
+
+    manifest = _resolve_manifest(args.manifest)
+    precompute_view_embeddings(
+        manifest_path=manifest,
+        backbone_key=args.backbone,
+        views=args.views,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        force=args.force,
+        limit=args.limit,
+        dtype=args.dtype,
     )
 
 
@@ -354,6 +385,26 @@ def build_parser() -> argparse.ArgumentParser:
         "--limit", type=int, default=None, help="Only embed the first N rows of the manifest (for quick trials)."
     )
     p_embed.set_defaults(func=cmd_embed)
+
+    p_embed_views = sub.add_parser(
+        "embed-views",
+        help="Precompute cached embeddings for every robustness view (5.2 table) of a manifest.",
+    )
+    p_embed_views.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
+    p_embed_views.add_argument("--manifest", required=True, choices=["train", "val", "heldout", "demo-val"])
+    p_embed_views.add_argument(
+        "--views", nargs="+", default=None, metavar="VIEW",
+        help="Only compute these views (default: all 15). E.g. --views clean blur_sigma2.0",
+    )
+    p_embed_views.add_argument(
+        "--batch-size", type=int, default=8,
+        help="Batch size in IMAGES; the effective GPU batch is this x n_views (default 8).",
+    )
+    p_embed_views.add_argument("--num-workers", type=int, default=4)
+    p_embed_views.add_argument("--force", action="store_true", help="Recompute even if a current cache exists.")
+    p_embed_views.add_argument("--limit", type=int, default=None, help="Only embed the first N rows.")
+    p_embed_views.add_argument("--dtype", default="float16", choices=["float16", "float32"])
+    p_embed_views.set_defaults(func=cmd_embed_views)
 
     p_train_head = sub.add_parser(
         "train-head", help="Train a classifier head on cached embeddings (run `embed` for train+val first)."
