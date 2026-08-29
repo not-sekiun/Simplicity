@@ -98,7 +98,7 @@ def main() -> Path:
     print("\n[train-ext] next:")
     print("  uv run main.py embed-views --backbone pe-core-l --manifest train-ext --train-chains")
     print("  uv run main.py train-head-views --backbone pe-core-l --with-chains --val-sample-rows 2000 \\")
-    print("      --train-manifest-name train-ext --out models/pe-core-l__linear__trainext.pt")
+    print("      --train-manifest train-ext --out models/pe-core-l__linear__trainext.pt")
     return OUT_MANIFEST
 
 

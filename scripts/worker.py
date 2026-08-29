@@ -70,8 +70,8 @@ JOBS = {
     "data:tiny-genimage": "Download the Tiny-GenImage training pool + heldout split.",
     "data:ood": "Stream the OOD evaluation tier (eval only, never trained on).",
     "data:train-ext": "Stream the disjoint generator-diverse training slice.",
-    "embed:train": "Embed all 22 views of the FULL train pool (23,800 rows).",
-    "embed:train-ext": "Embed all 22 views of the train-ext union manifest.",
+    "embed:train": "Embed the 11 training views of the FULL train pool (23,800 rows).",
+    "embed:train-ext": "Embed the 11 training views of the train-ext union manifest (31,567 rows).",
     "embed:ood": "Embed the 18 scored views of ood-s4000.",
     "embed:val": "Embed the 18 scored views of val-s2000.",
 }
@@ -136,10 +136,22 @@ def run_job(job: str) -> None:
                 **TRAIN_EXT_PULL,
             )
     elif job.startswith("embed:"):
+        from aigc_detect.train_head import TRAIN_VIEWS_WITH_CHAINS
+
         target = job.split(":", 1)[1]
+        # A TRAINING manifest only needs the 11 views the head actually trains
+        # on. The default grid is 22 (18 scored + 4 training chains), and the
+        # other 11 are held-out EVALUATION views -- which are never evaluated on
+        # a train manifest, so computing them there is half the GPU time for
+        # nothing. (The full-pool run on the primary machine was launched
+        # without this and paid that cost; don't repeat it here.)
+        # If a future ablation needs the held-out severities on a train
+        # manifest (as the augmentation ceiling probe did), run main.py
+        # embed-views directly with --train-chains and no --views.
+        train_views = ["--views", *TRAIN_VIEWS_WITH_CHAINS]
         args = {
-            "train": ["--manifest", "train", "--train-chains"],
-            "train-ext": ["--manifest", "train-ext", "--train-chains"],
+            "train": ["--manifest", "train", *train_views],
+            "train-ext": ["--manifest", "train-ext", *train_views],
             "ood": ["--manifest", "ood", "--sample-rows", "4000"],
             "val": ["--manifest", "val", "--sample-rows", "2000"],
         }[target]
