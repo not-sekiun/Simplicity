@@ -64,6 +64,11 @@ Subcommands:
                [--batch-size B]
                                       Train a classifier head on cached embeddings for
                                       KEY (run `embed` for both train and val first).
+    predict --input_dir DIR --output preds.json [--head PATH]
+                                      Run inference on a directory of images, emit
+                                      JSON [{"image_path": str, "pred": float}, ...]
+                                      where pred = P(AIGC). Deliverable 5.5.2. Also
+                                      runnable standalone as `uv run python predict.py`.
 
 Examples:
     uv run main.py check-env
@@ -363,6 +368,23 @@ def cmd_train_head(args):
     )
 
 
+def cmd_predict(args):
+    from aigc_detect.predict import run_inference
+
+    head_path = Path(args.head) if args.head else ROOT_DIR / "models" / "pe-core-l__linear__augchain.pt"
+    if not head_path.exists():
+        print(f"No head checkpoint at {head_path}. Pass --head <path> or train one first.")
+        sys.exit(1)
+
+    run_inference(
+        input_dir=args.input_dir,
+        head_path=head_path,
+        output_path=args.output,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -533,6 +555,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_train_head.add_argument("--batch-size", type=int, default=128)
     p_train_head.add_argument("--weight-decay", type=float, default=0.0)
     p_train_head.set_defaults(func=cmd_train_head)
+
+    p_predict = sub.add_parser(
+        "predict",
+        help="Run inference on a directory of images, emit JSON [{image_path, pred}] (deliverable 5.5.2).",
+    )
+    p_predict.add_argument("--input_dir", required=True, help="Directory to recurse for images.")
+    p_predict.add_argument("--output", required=True, help="Path to write the JSON predictions array to.")
+    p_predict.add_argument(
+        "--head", default=None,
+        help="Head checkpoint path (default: models/pe-core-l__linear__augchain.pt).",
+    )
+    p_predict.add_argument("--batch-size", type=int, default=32)
+    p_predict.add_argument("--num-workers", type=int, default=4)
+    p_predict.set_defaults(func=cmd_predict)
 
     return parser
 
