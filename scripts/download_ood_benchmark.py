@@ -148,12 +148,40 @@ def download_ood_benchmark(
     shuffle_buffer: int = 0,
     seed: int = 42,
     force: bool = False,
+    skip_rows: int = 0,
+    out_dir: Path | None = None,
+    index_path: Path | None = None,
+    source_name: str | None = None,
+    only_generators: tuple[str, ...] | None = None,
 ) -> Path:
+    """Stream a capped, generator-balanced slice.
+
+    ``skip_rows`` discards the first N rows before collecting anything. This is
+    how a TRAINING slice is kept provably disjoint from the evaluation tier:
+    streaming order is deterministic (shuffling is off, see the module
+    docstring), and every saved filename encodes its stream position, so
+    skipping past the eval tier's highest position guarantees no image can
+    appear in both. Disjointness is therefore a property of the construction,
+    not something checked afterwards by comparing pixels or filenames.
+
+    ``only_generators`` restricts what is kept. For a training slice this
+    should be the generators ABSENT from data/raw/, both because they are the
+    entire point of the exercise and because the shared generators are the ones
+    at risk of overlapping upstream with Tiny-GenImage (both datasets draw on
+    GenImage), which would leak training data into val.
+    """
     from datasets import load_dataset
     from tqdm import tqdm
 
-    OOD_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"[ood] streaming '{OOD_HF_HANDLE}' split='test' (32GB total; quotas cap what we keep)")
+    out_dir = Path(out_dir) if out_dir else OOD_DIR
+    index_path = Path(index_path) if index_path else OOD_INDEX
+    source_name = source_name or SOURCE_NAME
+    out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[ood] streaming '{OOD_HF_HANDLE}' split='test' -> {out_dir}")
+    if skip_rows:
+        print(f"[ood] skipping the first {skip_rows:,} rows (disjointness from the eval tier)")
+    if only_generators:
+        print(f"[ood] keeping only generators: {sorted(only_generators)}")
 
     ds = load_dataset(OOD_HF_HANDLE, split="test", streaming=True)
     if shuffle_buffer > 0:
@@ -179,6 +207,8 @@ def download_ood_benchmark(
     for ex in ds:
         scanned += 1
         bar.update(1)
+        if scanned <= skip_rows:
+            continue
         if max_scan is not None and scanned > max_scan:
             print(f"\n[ood] hit --max-scan {max_scan}; stopping with quotas partially filled")
             break
@@ -196,7 +226,7 @@ def download_ood_benchmark(
                 continue
             fake_quota[generator] += 1
 
-        gen_dir = OOD_DIR / "images" / generator
+        gen_dir = out_dir / "images" / generator
         gen_dir.mkdir(parents=True, exist_ok=True)
         img_path = gen_dir / f"ood_{scanned:07d}.jpg"
         if force or not img_path.exists():
@@ -226,20 +256,20 @@ def download_ood_benchmark(
             "the stream and adjust scripts/download_ood_benchmark.py."
         )
 
-    OOD_INDEX.parent.mkdir(parents=True, exist_ok=True)
-    with open(OOD_INDEX, "w", newline="", encoding="utf-8") as f:
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(index_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["image_path", "label", "source", "generator"])
         for image_path, label, generator in records:
-            w.writerow([image_path, label, SOURCE_NAME, generator])
+            w.writerow([image_path, label, source_name, generator])
 
     n_real = sum(1 for _, l, _ in records if l == LABEL_REAL)
     print(f"\n[ood] scanned {scanned:,}, kept {len(records):,} ({n_real} real / {len(records)-n_real} aigc)")
     print(f"[ood] per-generator kept: {dict(sorted(Counter(g for _, _, g in records).items()))}")
     unseen = sorted({g for _, _, g in records} - TRAIN_GENERATORS)
     print(f"[ood] UNSEEN generators (absent from data/raw/): {unseen}")
-    print(f"[ood] wrote index -> {OOD_INDEX}")
-    return OOD_INDEX
+    print(f"[ood] wrote index -> {index_path}")
+    return index_path
 
 
 def main():

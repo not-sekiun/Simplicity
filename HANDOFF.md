@@ -21,9 +21,138 @@ already `predict.py`'s default. `models/*__linear__race.pt` are the race
 artifacts; `pe-core-l__linear__race.pt` is equivalent to the shipping head
 (same config, same seed).
 
-**Your job now is section 3: deliverable 5.5.5 (error analysis), the last
-required piece.** Sections 1-2 below are retained as the record of how the
-decision was made -- read them only if you need to audit it.
+**Start at section 0 below** -- it carries the newest findings (the data lever,
+the disjoint training slice, and why metaclip2-giant is blocked). Sections 1-2
+are retained as the record of how the race decision was made; read them only
+if you need to audit it. Deliverable 5.5.5 (error analysis) is still the last
+required piece.
+
+---
+
+## 0. LATEST (2026-08-30) — the data lever is the live one; read this first
+
+Two jobs may still be running when you pick this up. Check before assuming:
+
+```
+data/embeddings/pe-core-l__train__*.npz   22 files = full-pool embedding DONE
+data/train_ext/train_ext_index.csv        exists  = training-slice pull DONE
+```
+
+### The finding that changed the plan
+
+I had written that both improvement levers were spent -- augmentation (the
+ceiling probe) and backbone (the race). Both true. **But nobody had tested the
+DATA lever, and it is the one still paying.** Learning curve, trained on
+cached `train-s6000` views, scored on `ood-s4000`:
+
+| train images | rows | ood clean | ood pooled | **ood SCORE** |
+|---|---|---|---|---|
+| 750 | 8,250 | 0.7889 | 0.6807 | 0.7348 |
+| 1,500 | 16,500 | 0.9044 | 0.7753 | 0.8398 |
+| 3,000 | 33,000 | 0.9394 | 0.8897 | 0.9145 |
+| 6,000 | 66,000 | 0.9532 | 0.9201 | **0.9366** |
+
+**The curve has not flattened** -- 3,000 -> 6,000 still bought +0.022. The
+shipping head used **6,000 of the 23,800 available (25%)**. Extrapolating,
+the full pool is worth roughly **+0.015-0.025**, larger than the entire
+backbone-race spread.
+
+(Caveat: measured on `ood`, which is mild tuning-on-the-benchmark. Safe here
+because the curve is monotone and the mechanism is obvious; do NOT use `ood`
+to pick a real hyper-parameter.)
+
+### Job 1 (running): full-pool embedding
+
+`embed-views --backbone pe-core-l --manifest train --train-chains` with no
+`--sample-rows`, so stem `train`, 23,800 rows x 22 views = 523,600 forwards,
+~1.7h. When it finishes:
+
+```
+uv run main.py train-head-views --backbone pe-core-l --with-chains     --val-sample-rows 2000 --out models/pe-core-l__linear__fullpool.pt
+```
+(`--train-sample-rows` omitted so the stem is `train`.) Then score it on
+`ood-s4000` and compare to **0.9366**. If it wins, this becomes the shipping
+head and `predict.py`'s default should be repointed.
+
+### Job 2 (running): disjoint generator-diverse training slice
+
+`data/train_ext/` -- a TRAINING slice from the same HF dataset as the eval
+tier, kept **provably disjoint by construction**: streaming order is
+deterministic (shuffle off), every filename encodes its stream position, the
+eval tier occupies positions 1..8,400, and this pull uses
+`skip_rows=8_400`. Disjointness is structural, not verified after the fact.
+
+It keeps only the **9 generators absent from `data/raw/`** (CycleGAN, DALLE2,
+GauGAN, ProGAN, SD14, SDXL, StarGAN, StyleGAN, StyleGAN2) plus Real. Two
+reasons: those generators are the entire point, and the SHARED generators are
+the ones at risk of overlapping upstream with Tiny-GenImage -- both datasets
+draw on GenImage -- which would leak training data into `val`.
+
+**Our training pool has 7 generators; this adds 9 unseen ones.** Given the
+competition's test generators are unknown, generator diversity is plausibly
+worth more than any remaining modelling change.
+
+**How to use it WITHOUT invalidating anything:** build a union manifest at a
+NEW path (e.g. `data/processed/train_ext.csv` = `train.csv` rows + the new
+index) and embed it under its own stem. Do **not** drop these images into
+`data/raw/` and re-run `main.py split` -- that rewrites `train.csv`/`val.csv`
+in place, changes their fingerprints, and invalidates every existing cache
+(opens E3). The whole point of a new stem is that nothing already computed
+becomes stale.
+
+Residual caveat to state in any write-up: the new slice's **reals** could
+still overlap upstream with Tiny-GenImage reals, which would inflate `val`
+but not `ood` (ood is disjoint by construction). If val rises much more than
+ood after adding this data, suspect exactly that.
+
+### Do NOT train on `data/ood/`
+
+It is the only benchmark that still discriminates (0 of 18 views >= 0.99,
+against 11 on val and 16 on demo-val). Training on it destroys the one
+instrument that can measure anything, and repeats the error the project
+already avoided with demo-val. `data/train_ext/` is the legitimate way to get
+the same generator diversity into training.
+
+### metaclip2-giant: registered, legal, and BLOCKED on a code change
+
+My earlier rejection of Giant was based on an estimate and was wrong on the
+facts. Measured:
+
+```
+vision-tower params = 1,843,564,416   -> 92.2% of the 2B cap, LEGAL
+forward OK, pooled_dim 1664 at 378px, VRAM 7.38 GB allocated of 12.9
+```
+
+It is registered as `metaclip2-giant` and the loader dispatch now keys on the
+MetaCLIP2 *family* rather than the exact name.
+
+**But it cannot currently be run, and the blocker is not time.** Benchmarked
+in isolation it does 13.2 img/s at a raw forward batch of 8, and collapses to
+1.4 img/s at 16 -- despite peak memory staying under the limit. `embed_views`
+flattens each batch to `batch_size * n_views`, so even `--batch-size 1` sends
+**18 images per forward**, which is past that cliff. Measured end to end:
+**1.33 img/s**, i.e. ~50 hours for the race protocol, not the ~5 I first
+estimated.
+
+**To run Giant you must first add micro-batching to
+`embed_views.precompute_view_embeddings`**: chunk the flattened `b*v` tensor
+into pieces of <= 8 and concatenate the results. Without that it is not slow,
+it is infeasible.
+
+Priority: **last**. It needs code, costs the most, its own family already lost
+on all 18 views, and the data lever above is a larger expected gain for a
+third of the compute. Licence is `cc-by-nc-4.0` (non-commercial) -- the user
+judged that acceptable, but confirm before shipping it if it ever wins.
+
+### Revised priority order
+
+| # | Work | Cost | Expected value |
+|---|---|---|---|
+| 1 | Full-pool retrain (job 1) | running | +0.015-0.025, direction certain |
+| 2 | Deliverable 5.5.5 error analysis | ~1h, CPU | required, still not started |
+| 3 | Union manifest with `data/train_ext/` | ~1h embed | potentially largest; 9 new generators |
+| 4 | metaclip2-giant | micro-batching + ~5h | prior says it loses by ~0.02 |
+
 
 Read order: this file, then `NARRATIVE.md`'s "Comparability epochs" table
 (short, and it will stop you comparing numbers that are not comparable). Only
@@ -128,6 +257,9 @@ a prediction about these checkpoints.
 | 5.5.4 robustness summary | **DONE** — `main.py eval-grid`, 18 views, `reports/grid__*.csv` |
 | 5.5.5 error analysis | **NOT STARTED** — the last required piece |
 | Backbone race | **DONE** — `pe-core-l` wins; see the top of this file and NARRATIVE Run 7 |
+| Full-pool retrain | running / see section 0 |
+| `data/train_ext/` slice | running / see section 0 |
+| `metaclip2-giant` | registered + legal, BLOCKED on micro-batching — section 0 |
 
 **5.5.5 is now the highest-value remaining work.** The
 raw material already exists: `reports/race/*/grid_ood.csv` for per-view and
