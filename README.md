@@ -9,8 +9,10 @@ Environment, dataset download/indexing scripts, and the data augmentation /
 robustness-eval transform pipeline are built and verified. Local data is
 downloaded: **CIFAKE** (full, 120k images) + **SID_Set** (4000/class subset,
 8k images) are indexed and split into `data/processed/{train,val}.csv`
-(108,800 train / 19,200 val, stratified by source+label). WildFake is not
-yet ingested (see below). Model training/inference code is not built yet.
+(108,800 train / 19,200 val, stratified by source+label). The self-reported
+**demo-val** set (5.4) has its COCO val2017 half downloaded and built
+(5000 images); the WildFake "DALL·E Advanced" half is pending manual fetch
+(see below). Model training/inference code is not built yet.
 
 ## Setup
 
@@ -103,9 +105,12 @@ uv run main.py download-demo wildfake-dalle-advanced   # indexes a manual downlo
 uv run main.py build-demo-val                          # merges both into data/demo_val/demo_val.csv
 ```
 
-- **COCO val2017** downloads directly from the public COCO S3 bucket
-  (~815MB, no auth). Standard val2017 has 5000 images; the brief cites 4998,
-  so we index the full standard set as a stated assumption (off by ≤2 of
+- **COCO val2017** downloads via a Kaggle mirror by default (same official
+  5000 val2017 images, re-hosted; ~40s at ~20MB/s with your Kaggle token)
+  and falls back to the official S3 bucket (no auth, but was observed at
+  ~12kB/s / an 18+ hour ETA on this network — badly throttled) if Kaggle
+  isn't set up. Standard val2017 has 5000 images; the brief cites 4998, so
+  we index the full standard set as a stated assumption (off by ≤2 of
   ~5000) rather than guess which 2 to exclude.
 - **WildFake "DALL·E Advanced"** does **not** download automatically: this
   network cannot reach ModelScope's API or SDK endpoints at all — both

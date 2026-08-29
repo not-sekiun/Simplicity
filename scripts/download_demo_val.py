@@ -13,8 +13,11 @@ Usage:
     uv run main.py download-demo wildfake-dalle-advanced
     uv run main.py build-demo-val
 
-COCO val2017 downloads directly (public S3 bucket, no auth). WildFake's
-"DALL·E Advanced" subset does NOT download automatically: this network
+COCO val2017 downloads via a Kaggle mirror by default (same Kaggle
+credentials as CIFAKE) since the official S3 bucket can be severely
+throttled on some networks; falls back to the official S3 zip (no auth
+needed, just slower) if Kaggle isn't set up. WildFake's "DALL·E Advanced"
+subset does NOT download automatically: this network
 cannot reach ModelScope's API or SDK endpoints at all (confirmed — both hang
 indefinitely), which matches the challenge brief's own note that the
 ModelScope page needs a manual translate-button step. Fetch it yourself:
@@ -37,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from aigc_detect.config import DEMO_VAL_DIR, LABEL_AIGC, LABEL_REAL  # noqa: E402
 
 COCO_VAL2017_URL = "http://images.cocodataset.org/zips/val2017.zip"
+COCO_VAL2017_KAGGLE_HANDLE = "xthink/coco-2017-val-images"  # same 5000 official val2017 images, faster CDN
 COCO_VAL2017_DIR = DEMO_VAL_DIR / "coco_val2017"
 WILDFAKE_DALLE_ADVANCED_DIR = DEMO_VAL_DIR / "wildfake_dalle_advanced"
 
@@ -58,34 +62,61 @@ def _write_index(name: str, records: list[tuple[str, int]]) -> Path:
     return index_path
 
 
-def download_coco_val2017() -> Path:
+def _download_coco_via_kaggle_mirror() -> list[Path]:
+    """Fast path: a Kaggle-hosted re-upload of the same 5000 official val2017
+    images. The official S3 bucket (images.cocodataset.org) is reachable but
+    can be throttled to single-digit KB/s on some networks (observed: an
+    18+ hour ETA for 815MB) — Kaggle's CDN was ~20MB/s (~40s) in comparison,
+    matching CIFAKE's download speed. Requires the same Kaggle credentials
+    as `download_cifake()`."""
+    import kagglehub
+
+    print(f"[coco_val2017] downloading Kaggle mirror '{COCO_VAL2017_KAGGLE_HANDLE}'...")
+    mirror_root = Path(kagglehub.dataset_download(COCO_VAL2017_KAGGLE_HANDLE))
+    return sorted(mirror_root.rglob("*.jpg"))
+
+
+def _download_coco_via_official_s3() -> list[Path]:
+    """Slow-but-guaranteed fallback: the official COCO S3 bucket, no auth needed."""
     import requests
     from tqdm import tqdm
 
-    DEMO_VAL_DIR.mkdir(parents=True, exist_ok=True)
     zip_path = DEMO_VAL_DIR / "val2017.zip"
+    if not zip_path.exists():
+        print(f"[coco_val2017] downloading {COCO_VAL2017_URL} (~815MB)...")
+        resp = requests.get(COCO_VAL2017_URL, stream=True, timeout=30)
+        resp.raise_for_status()
+        total = int(resp.headers.get("content-length", 0))
+        with open(zip_path, "wb") as f, tqdm(total=total, unit="B", unit_scale=True) as bar:
+            for chunk in resp.iter_content(chunk_size=1 << 20):
+                f.write(chunk)
+                bar.update(len(chunk))
 
-    if not any(COCO_VAL2017_DIR.glob("*.jpg")):
-        if not zip_path.exists():
-            print(f"[coco_val2017] downloading {COCO_VAL2017_URL} (~815MB)...")
-            resp = requests.get(COCO_VAL2017_URL, stream=True, timeout=30)
-            resp.raise_for_status()
-            total = int(resp.headers.get("content-length", 0))
-            with open(zip_path, "wb") as f, tqdm(total=total, unit="B", unit_scale=True) as bar:
-                for chunk in resp.iter_content(chunk_size=1 << 20):
-                    f.write(chunk)
-                    bar.update(len(chunk))
+    print("[coco_val2017] extracting...")
+    with zipfile.ZipFile(zip_path) as zf:
+        zf.extractall(DEMO_VAL_DIR)  # zip contains a top-level val2017/ folder
+    zip_path.unlink(missing_ok=True)
+    return sorted(COCO_VAL2017_DIR.glob("*.jpg"))
 
-        print("[coco_val2017] extracting...")
-        with zipfile.ZipFile(zip_path) as zf:
-            zf.extractall(DEMO_VAL_DIR)  # zip contains a top-level val2017/ folder
-        zip_path.unlink(missing_ok=True)
 
-    records = [(str(p.resolve()), LABEL_REAL) for p in sorted(COCO_VAL2017_DIR.glob("*.jpg"))]
+def download_coco_val2017(prefer_kaggle: bool = True) -> Path:
+    DEMO_VAL_DIR.mkdir(parents=True, exist_ok=True)
+
+    image_paths: list[Path] = []
+    if prefer_kaggle:
+        try:
+            image_paths = _download_coco_via_kaggle_mirror()
+        except Exception as err:  # noqa: BLE001 - any auth/network failure -> fall back
+            print(f"[coco_val2017] Kaggle mirror failed ({err!r}), falling back to official S3...")
+
+    if not image_paths:
+        image_paths = _download_coco_via_official_s3()
+
+    records = [(str(p.resolve()), LABEL_REAL) for p in image_paths]
     if not records:
-        raise RuntimeError(f"No images found under {COCO_VAL2017_DIR} after extraction.")
+        raise RuntimeError("No COCO val2017 images found from either source.")
     print(f"[coco_val2017] indexed {len(records)} images "
-          f"(brief cites 4998; standard val2017 is 5000 — see module docstring).")
+          f"(brief cites 4998; standard val2017 is 5000 -- see module docstring).")
     return _write_index("coco_val2017", records)
 
 

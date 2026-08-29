@@ -66,7 +66,7 @@ def main():
     if demo_df["source"].nunique() < 2:  # noqa: PLR2004
         have = set(demo_df["source"].unique())
         missing = {"coco_val2017", "wildfake_dalle_advanced"} - have
-        print(f"[build-demo-val] NOTE: only {have} indexed so far — still missing {missing}.")
+        print(f"[build-demo-val] NOTE: only {have} indexed so far -- still missing {missing}.")
 
 
 if __name__ == "__main__":
