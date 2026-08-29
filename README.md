@@ -192,8 +192,24 @@ so a per-axis-only grid measures the regime they don't fail in.
 Ops run in **physical** order: JPEG last (the final upload always
 re-encodes), noise before its JPEG (sensor noise exists at capture, and
 compressing noisy content is the interaction that breaks frequency-domain
-detectors). `eval-grid` reports the single-view mean against the chained mean
-so the delta is explicit.
+detectors).
+
+**No chain may repeat a transform family** — enforced at import by
+`_validate_chain_specs()`. Two σ2.0 blurs compose to σ_eff = 2.83 against a
+table maximum of 2.0, and two 0.5x resizes compound to 0.25x; either would
+quietly test a severity outside the brief's envelope while still producing a
+plausible number.
+
+A separate `TRAIN_CHAIN_SPECS` holds four **training-only** chains, disjoint
+from the scored three and built only from severities already in the default
+training set, so training on composition never contaminates the columns that
+measure it. They are excluded from `eval_view_names()` and can never enter
+`AUC_robust`.
+
+`eval-grid` reports each chain against its **own weakest component**
+(composition penalty) as the primary composition diagnostic; the
+chained-vs-single means are also printed, but they conflate depth with
+severity choice and should be read second.
 
 ## Model pipeline
 

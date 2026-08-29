@@ -300,6 +300,62 @@ That is a direct, measured argument for putting chained views into
 **training**, not just evaluation — the next experiment, and the reason
 `CHAIN_SPECS` is a table rather than three hardcoded pipelines.
 
+### Run 6 — chained views in training. **Closes Run 5's gap.**
+
+Run 5 left one thing unfixed: composition. Added `TRAIN_CHAIN_SPECS` — four
+training-only chains, **disjoint from the three scored ones** and built
+*exclusively* from severities already in `TRAIN_VIEWS_DEFAULT`, so the single
+new variable is composition and the severity holdout is untouched.
+
+```
+trainchain_a  blur1.0 -> jpeg70                              (2 ops)
+trainchain_b  noise0.05 -> jpeg70                            (2 ops)
+trainchain_c  crop80 -> jitter -> blur1.0                    (3 ops, no JPEG at all)
+trainchain_d  jitter -> resize0.5 -> noise0.05 -> jpeg70     (4 ops)
+```
+
+`trainchain_c` deliberately does not end in a re-encode, so the head cannot
+key on "a chain is the thing that ends in JPEG". `trainchain_*` views are
+excluded from `eval_view_names()`, so they can never enter AUC_robust.
+
+| | Run 5 (aug) | **Run 6 (augchain)** |
+|---|---|---|
+| val AUC_clean | 0.9985 | 0.9981 |
+| val AUC_robust (pooled) | 0.9770 | **0.9803** |
+| **val score (pooled)** | 0.9878 | **0.9892** |
+| val worst view | `chain_heavy` 0.8627 | `noise_sigma0.1` 0.9179 |
+| **val score (worst-case)** | 0.9306 | **0.9580** |
+| demo-val score (pooled) | 0.9978 | **0.9984** |
+
+The pooled headline barely moves (+0.0014). **The chains move a lot** — and
+all three were held out:
+
+| held-out chain | Run 5 | Run 6 | |
+|---|---|---|---|
+| `chain_light` | 0.9880 | 0.9952 | +0.0072 |
+| `chain_medium` | 0.9435 | 0.9591 | +0.0156 |
+| `chain_heavy` | 0.8627 | **0.9182** | **+0.0555** |
+
+Composition penalty (each chain vs its own weakest component) more than
+halves at depth:
+
+```
+             Run 5      Run 6
+chain_light  -0.0027   +0.0031
+chain_medium -0.0473   -0.0329
+chain_heavy  -0.0860   -0.0364
+```
+
+**Composition training transfers to unseen compositions**, the same way
+severity training transferred to unseen severities in Run 5. `chain_heavy` is
+no longer the worst cell in the grid, and the worst-case score — the
+adversarial number, what someone who gets to pick the transform achieves —
+improves **0.9306 -> 0.9580**.
+
+The binding constraint moved to `noise_sigma0.1` (0.9179), a held-out
+severity. Heavy sensor noise is now the weakest axis; that is the next thing
+to attack, not composition.
+
 ---
 
 ## Scoreboard
@@ -312,7 +368,16 @@ Competition metric is `0.5*AUC_clean + 0.5*AUC_robust`, pooled.
 | 4 | clean-trained, full grid | 0.9388 | 0.9484 |
 | 5 control | clean-only, 6k images | 0.9472 | 0.9631 |
 | 5 control | clean-only, 6k images, 14 epochs | 0.9382 | — |
-| **5** | **augmented-view trained** | **0.9878** | **0.9978** |
+| 5 | augmented-view trained | 0.9878 | 0.9978 |
+| **6** | **+ chained views in training** | **0.9892** | **0.9984** |
 
-Next: chained views in training (the only gap Run 5 left open), then the
-backbone race on `--sample-rows 2000`.
+Worst-case (`0.5*clean + 0.5*min per-view AUC`), the adversarial reading:
+
+| Run | val | binding view |
+|---|---|---|
+| 4 | 0.9126 | `chain_heavy` |
+| 5 | 0.9306 | `chain_heavy` |
+| **6** | **0.9580** | `noise_sigma0.1` |
+
+Next: heavy sensor noise is now the weakest axis (0.9179) — attack that, not
+composition. Then the backbone race on `--sample-rows 2000`.

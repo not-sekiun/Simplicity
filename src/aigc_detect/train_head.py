@@ -20,6 +20,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from aigc_detect.config import EMBEDDINGS_DIR, ROOT_DIR, TRAIN_MANIFEST, VAL_MANIFEST
 from aigc_detect.heads import build_head
+from aigc_detect.transforms import eval_view_names, train_chain_view_names
 
 
 def _load_npz(path: Path):
@@ -78,6 +79,13 @@ TRAIN_VIEWS_DEFAULT = (
     "color_jitter",
     "center_crop_80",
 )
+
+# TRAIN_VIEWS_DEFAULT plus the four training-only chains. Those chains are built
+# exclusively from severities already in TRAIN_VIEWS_DEFAULT, so switching to
+# this set adds *composition* and nothing else -- the severity holdout
+# (q90/q50/q30, blur 0.5/2.0, resize 0.25x, noise 0.02/0.1) is unchanged, and
+# the three scored chains remain unseen. See transforms.TRAIN_CHAIN_SPECS.
+TRAIN_VIEWS_WITH_CHAINS = TRAIN_VIEWS_DEFAULT + train_chain_view_names()
 
 
 def _grid_auc(head, device, view_arrays, mean, std) -> tuple[float, float]:
@@ -140,9 +148,15 @@ def train_head_on_views(
         with np.load(p, allow_pickle=True) as d:
             train_arrays[view] = (d["embeddings"].astype(np.float32), d["labels"].astype(np.int64))
 
+    # Validate on the SCORED views only, so the per-epoch AUC_robust printed
+    # here is the same quantity eval-grid reports. A trainchain_* cache landing
+    # in this glob would silently score the head on its own training data.
+    scored = set(eval_view_names())
     val_arrays = {}
     for p in sorted(EMBEDDINGS_DIR.glob(f"{backbone_key}__{val_stem}__*.npz")):
         view = p.name[len(f"{backbone_key}__{val_stem}__") : -len(".npz")]
+        if view not in scored:
+            continue
         with np.load(p, allow_pickle=True) as d:
             val_arrays[view] = (d["embeddings"].astype(np.float32), d["labels"].astype(np.int64))
     if "clean" not in val_arrays:

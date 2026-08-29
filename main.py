@@ -288,17 +288,20 @@ def cmd_embed_views(args):
         limit=args.limit,
         sample_rows=args.sample_rows,
         sample_seed=args.sample_seed,
+        include_train_chains=args.train_chains,
         dtype=args.dtype,
     )
 
 
 def cmd_train_head_views(args):
     from aigc_detect.embed_views import cache_stem
-    from aigc_detect.train_head import TRAIN_VIEWS_DEFAULT, train_head_on_views
+    from aigc_detect.train_head import TRAIN_VIEWS_DEFAULT, TRAIN_VIEWS_WITH_CHAINS, train_head_on_views
 
     train_stem = cache_stem(TRAIN_MANIFEST, sample_rows=args.train_sample_rows)
     val_stem = cache_stem(VAL_MANIFEST, sample_rows=args.val_sample_rows)
     views = tuple(args.train_views) if args.train_views else TRAIN_VIEWS_DEFAULT
+    if args.with_chains:
+        views = TRAIN_VIEWS_WITH_CHAINS
     if args.clean_only:
         views = ("clean",)
 
@@ -472,6 +475,11 @@ def build_parser() -> argparse.ArgumentParser:
              "Caches under a '-sN' stem so it coexists with the full run.",
     )
     p_embed_views.add_argument("--sample-seed", type=int, default=RANDOM_SEED)
+    p_embed_views.add_argument(
+        "--train-chains", action="store_true",
+        help="Also compute the 4 trainchain_* augmentation views. Train manifest only -- they are "
+             "never scored, so caching them for val/demo-val is waste.",
+    )
     p_embed_views.add_argument("--dtype", default="float16", choices=["float16", "float32"])
     p_embed_views.set_defaults(func=cmd_embed_views)
 
@@ -487,6 +495,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_thv.add_argument("--train-views", nargs="+", default=None, metavar="VIEW",
                        help="Views to TRAIN on (default: one severity per family; the rest, "
                             "including all chains, stay held out and are only evaluated).")
+    p_thv.add_argument("--with-chains", action="store_true",
+                       help="Also train on the 4 trainchain_* views (composition, built only from "
+                            "severities already in the default set). The 3 SCORED chains stay held out.")
     p_thv.add_argument("--clean-only", action="store_true",
                        help="Control arm: train on the clean view alone, same images, same scaler.")
     p_thv.add_argument("--head", default="linear", choices=["linear", "mlp"])

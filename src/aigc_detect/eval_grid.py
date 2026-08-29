@@ -53,7 +53,12 @@ from aigc_detect.config import RANDOM_SEED, ROOT_DIR
 from aigc_detect.embed import fingerprint_paths
 from aigc_detect.embed_views import cache_stem, select_rows, view_embeddings_path, view_fingerprint
 from aigc_detect.heads import build_head
-from aigc_detect.transforms import build_robustness_views, chain_view_names
+from aigc_detect.transforms import (
+    build_robustness_views,
+    chain_component_views,
+    chain_view_names,
+    eval_view_names,
+)
 
 
 def _best_balanced_threshold(labels: np.ndarray, probs: np.ndarray) -> float:
@@ -138,7 +143,11 @@ def evaluate_grid(
     df = select_rows(manifest_path, limit=limit, sample_rows=sample_rows, sample_seed=sample_seed)
     expected_m_fp = fingerprint_paths(df["image_path"])
 
-    _, specs = build_robustness_views()  # specs are resolution-independent
+    _, all_specs = build_robustness_views()  # specs are resolution-independent
+    # Score the 18 evaluation views only. trainchain_* views may be cached for
+    # this backbone (they are augmentation material for the train manifest);
+    # letting one into AUC_robust would score the head on its own training data.
+    specs = {n: all_specs[n] for n in eval_view_names()}
     chains = set(chain_view_names())
 
     rows, missing, ref_labels = [], [], None
@@ -236,6 +245,25 @@ def evaluate_grid(
     print(f"robustness gap (BAcc@t, clean - mean degraded) {bacc_gap:.4f}")
 
     if chain_rows:
+        # PRIMARY composition diagnostic: each chain against its own WEAKEST
+        # component. Severity is held fixed by construction, so what remains is
+        # the cost of composing. The chained-vs-single means printed below are
+        # the cruder version -- they also reflect which severities each group
+        # happens to contain (the single-view mean averages in jpeg_q90 and
+        # blur_sigma0.5 at ~0.998), so read this block first.
+        print("\ncomposition penalty (chain AUC - weakest component's AUC):")
+        by_view_auc = {r["view"]: r["auc"] for r in rows}
+        for r in chain_rows:
+            comps = {v: by_view_auc[v] for v in chain_component_views(r["view"]) if v in by_view_auc}
+            if not comps:
+                continue
+            weakest = min(comps, key=comps.get)
+            print(f"  {r['view']:<14} {r['auc']:.4f}  vs {weakest:<16} {comps[weakest]:.4f}"
+                  f"   penalty {r['auc'] - comps[weakest]:+.4f}")
+        print("  Negative, growing with depth = composition costs more than any single part.")
+        print("  Positive = degradation is moving inputs TOWARD the training domain, so the")
+        print("  clean view is the outlier rather than the chains.")
+
         chain_mean = float(np.mean([r["auc"] for r in chain_rows]))
         single_mean = float(np.mean([r["auc"] for r in singles])) if singles else float("nan")
         delta = chain_mean - single_mean

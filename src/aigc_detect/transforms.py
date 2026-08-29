@@ -97,6 +97,88 @@ CHAIN_SPECS: dict[str, tuple[tuple[str, float | int | None], ...]] = {
     "chain_heavy": (("blur", 1.0), ("resize", 0.25), ("noise", 0.05), ("jpeg", 30)),
 }
 
+# Chains the head is allowed to TRAIN on. Deliberately disjoint from CHAIN_SPECS
+# above, which is evaluation-only: training on the exact compositions we then
+# score would make the chain columns measure memorization instead of
+# generalization, and those three columns are the only evidence we have about
+# composition at all.
+#
+# Two constraints make the resulting experiment readable:
+#
+#   1. **Only severities already in TRAIN_VIEWS_DEFAULT** (jpeg q70, blur 1.0,
+#      resize 0.5x, noise 0.05, jitter, crop 80). The severity holdout from the
+#      previous run therefore stays intact -- q90/q50/q30, blur 0.5/2.0,
+#      resize 0.25x, noise 0.02/0.1 remain unseen -- so the single new variable
+#      is *composition*, not "the head saw more severities".
+#   2. **Different structures**, not reordered copies: depths 2/3/4, and
+#      trainchain_c deliberately does NOT end in JPEG, so the head cannot key
+#      on "a chain is the thing that ends in a re-encode".
+#
+# The three eval chains then span a useful gradient of novelty:
+#   chain_light   q70 + 0.5x -- both severities trained; novelty is PURELY the
+#                 composition
+#   chain_medium  contains q50 -- a held-out severity inside a novel composition
+#   chain_heavy   contains 0.25x and q30 -- held-out severities AND novel
+#                 composition; the hardest cell in the grid
+#
+# Honest limitation: the severity palette is small, so train and eval chains
+# necessarily share sub-sequences (e.g. jitter -> resize 0.5x appears in both
+# trainchain_d and chain_medium). What is avoided is *identity*, not
+# resemblance. Read the chain results as "does composition training transfer to
+# nearby unseen compositions", which is the deployable question, rather than as
+# a claim about arbitrary unseen chains.
+TRAIN_CHAIN_SPECS: dict[str, tuple[tuple[str, float | int | None], ...]] = {
+    "trainchain_a": (("blur", 1.0), ("jpeg", 70)),
+    "trainchain_b": (("noise", 0.05), ("jpeg", 70)),
+    "trainchain_c": (("crop80", None), ("jitter", None), ("blur", 1.0)),
+    "trainchain_d": (("jitter", None), ("resize", 0.5), ("noise", 0.05), ("jpeg", 70)),
+}
+
+
+def _validate_chain_specs() -> None:
+    """No chain may apply the same transform family twice.
+
+    A repeated family compounds into an effective severity **outside the 5.2
+    table**, which is the envelope this whole grid claims to test:
+
+        blur 2.0 then blur 2.0   -> sigma_eff = sqrt(2^2 + 2^2) = 2.83   (table max 2.0)
+        resize 0.5x then 0.5x    -> 0.25x, but reported under some other name
+        jitter +-20% twice       -> up to +-44%
+        crop 80% twice           -> 64% of the frame
+
+    The chain would still run, still produce a plausible number, and still be
+    labelled as a composition of in-table severities. Nothing would flag that
+    the reported robustness envelope had quietly widened.
+
+    (Repeated re-encoding IS realistic -- real redistribution JPEGs an image
+    many times. It is excluded here because the deliverable is defined against
+    the brief's parameter table; a multi-encode study is a separate axis, and
+    should be added as its own named severity rather than smuggled in via a
+    chain.)
+
+    Runs at import so an edit to either spec table fails immediately, rather
+    than after a 20-minute embedding pass.
+    """
+    for table_name, table in (("CHAIN_SPECS", CHAIN_SPECS), ("TRAIN_CHAIN_SPECS", TRAIN_CHAIN_SPECS)):
+        for name, ops in table.items():
+            families = [op for op, _ in ops]
+            dupes = {f for f in families if families.count(f) > 1}
+            if dupes:
+                raise ValueError(
+                    f"{table_name}['{name}'] applies {sorted(dupes)} more than once. "
+                    f"Repeated families compound past the 5.2 severity table -- see "
+                    f"_validate_chain_specs."
+                )
+    overlap = set(CHAIN_SPECS.values()) & set(TRAIN_CHAIN_SPECS.values())
+    if overlap:
+        raise ValueError(
+            f"TRAIN_CHAIN_SPECS duplicates an evaluation chain ({overlap}). Training on a "
+            f"chain we then score turns the chain columns into a memorization test."
+        )
+
+
+_validate_chain_specs()
+
 
 # ---------------------------------------------------------------------------
 # Individual transforms. Each is a plain callable operating on a PIL Image
@@ -472,7 +554,7 @@ def _build_grid(
     # Chained views. Every op here is PIL-domain (including noise, via
     # PILGaussianNoise) so the chain can be applied in physical order, ending
     # with the final re-encode -- see the CHAIN_SPECS comment block.
-    for name, ops in CHAIN_SPECS.items():
+    for name, ops in {**CHAIN_SPECS, **TRAIN_CHAIN_SPECS}.items():
         steps, parts, stochastic = [], [], False
         for op, param in ops:
             if op == "jpeg":
@@ -504,5 +586,48 @@ def _build_grid(
 
 
 def chain_view_names() -> tuple[str, ...]:
-    """Names of the chained views, in declaration (increasing-depth) order."""
+    """Names of the EVALUATION chained views, in declaration order."""
     return tuple(CHAIN_SPECS)
+
+
+def chain_component_views(chain_name: str) -> tuple[str, ...]:
+    """The single-transform view names a chain is built from.
+
+    Enables the sharper composition diagnostic: a chain's AUC against the AUC
+    of its own *weakest component*. The cruder chained-mean-minus-single-mean
+    delta conflates depth with severity choice -- the single-view mean averages
+    in rows like jpeg_q90 and blur_sigma0.5 that score ~0.998, so a negative
+    delta partly just says "chains are harsher than the average single view".
+    Comparing a chain to its own parts isolates the cost of *composition*, with
+    severity held fixed by construction.
+    """
+    table = {**CHAIN_SPECS, **TRAIN_CHAIN_SPECS}
+    if chain_name not in table:
+        raise KeyError(f"'{chain_name}' is not a chained view. Known: {sorted(table)}")
+    naming = {
+        "jpeg": lambda p: f"jpeg_q{p}",
+        "blur": lambda p: f"blur_sigma{p}",
+        "resize": lambda p: f"resize_{p}x",
+        "noise": lambda p: f"noise_sigma{p}",
+        "jitter": lambda _p: "color_jitter",
+        "crop80": lambda _p: "center_crop_80",
+    }
+    return tuple(naming[op](param) for op, param in table[chain_name])
+
+
+def train_chain_view_names() -> tuple[str, ...]:
+    """Names of the training-only chained views (never scored -- see
+    TRAIN_CHAIN_SPECS)."""
+    return tuple(TRAIN_CHAIN_SPECS)
+
+
+def eval_view_names() -> tuple[str, ...]:
+    """The 18 views the robustness grid is scored over.
+
+    Excludes `trainchain_*`, which exist purely as augmentation material. They
+    are built by the same grid so they can be cached by the same pass, but
+    including a view the head trained on in AUC_robust would inflate the
+    competition metric with its own training data.
+    """
+    train_chains = set(TRAIN_CHAIN_SPECS)
+    return tuple(n for n in build_robustness_eval_transforms() if n not in train_chains)

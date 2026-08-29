@@ -73,7 +73,11 @@ from aigc_detect.backbones import load_backbone
 from aigc_detect.config import EMBEDDINGS_DIR, RANDOM_SEED, ROOT_DIR
 from aigc_detect.dataset import ManifestImageDataset
 from aigc_detect.embed import fingerprint_paths
-from aigc_detect.transforms import build_robustness_views
+from aigc_detect.transforms import (
+    build_robustness_views,
+    eval_view_names,
+    train_chain_view_names,
+)
 
 # Bumped only if the *seeding scheme* changes. Folded into the fingerprint of
 # stochastic views only -- a deterministic view's output does not depend on it,
@@ -220,6 +224,7 @@ def precompute_view_embeddings(
     limit: int | None = None,
     sample_rows: int | None = None,
     sample_seed: int = RANDOM_SEED,
+    include_train_chains: bool = False,
     dtype: str = "float16",
 ) -> list[Path]:
     """Embed every requested view of ``manifest_path`` in one pass over the data.
@@ -258,6 +263,13 @@ def precompute_view_embeddings(
         if unknown:
             raise KeyError(f"Unknown view(s) {sorted(unknown)}. Available: {list(all_pipelines)}")
         all_pipelines = {k: all_pipelines[k] for k in views}
+    else:
+        # Default to the 18 SCORED views. The trainchain_* views are
+        # augmentation material for the train manifest only -- caching them for
+        # val/demo-val would be pure waste, and they must never enter
+        # AUC_robust.
+        keep = set(eval_view_names()) | (set(train_chain_view_names()) if include_train_chains else set())
+        all_pipelines = {k: v for k, v in all_pipelines.items() if k in keep}
 
     df = select_rows(manifest_path, limit=limit, sample_rows=sample_rows, sample_seed=sample_seed)
     stem = cache_stem(manifest_path, limit=limit, sample_rows=sample_rows)

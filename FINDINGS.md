@@ -658,15 +658,33 @@ the **same dataset family the paper trains on**.
 
       Full detail and per-view tables in NARRATIVE.md Run 5.
 
-- [ ] **Chained views in TRAINING** — the one gap Run 5 left open. Single-axis
-      augmentation transfers to unseen *severities* (blur sigma2.0 gains +0.36
-      balanced accuracy having only seen sigma1.0) but only weakly to
-      *compositions*: the single-vs-chain AUC delta was -0.0488 before and
-      -0.0481 after, i.e. unchanged. `chain_heavy` is still the worst view in
-      the grid (0.8627) and binds the worst-case score. Add the chains to
-      `TRAIN_VIEWS_DEFAULT` and re-run — but hold at least one chain out, or
-      the result is uninterpretable for the same reason the severity holdout
-      exists.
+- [x] **Chained views in TRAINING** — DONE 2026-08-29 (Run 6).
+      `TRAIN_CHAIN_SPECS` adds four training-only chains, disjoint from the
+      three scored ones and built only from severities already in
+      `TRAIN_VIEWS_DEFAULT`, so composition is the single new variable.
+      `--with-chains` on `train-head-views`, `--train-chains` on
+      `embed-views`.
+
+      **Composition training transfers to unseen compositions.** All three
+      scored chains were held out and all three improved: `chain_heavy`
+      0.8627 -> **0.9182**, and its composition penalty (chain AUC minus its
+      own weakest component's AUC) more than halved, -0.0860 -> -0.0364.
+      Pooled score moves little (0.9878 -> 0.9892) but **worst-case moves a
+      lot: 0.9306 -> 0.9580**, and the binding view is no longer a chain.
+
+      Next weakest axis is now `noise_sigma0.1` at 0.9179 — a held-out
+      severity. Attack heavy sensor noise, not composition.
+
+- [ ] **A chain may not repeat a transform family** — enforced at import by
+      `transforms._validate_chain_specs()`, and worth understanding before
+      editing either spec table. A repeated family compounds *past the 5.2
+      severity envelope the grid claims to test*: blur 2.0 twice is
+      sigma_eff = 2.83 against a table maximum of 2.0; resize 0.5x twice is
+      0.25x reported under another name; jitter twice is +-44%. The chain
+      still runs and still produces a plausible number, so nothing flags that
+      the reported robustness envelope quietly widened. Repeated *re-encoding*
+      is genuinely realistic and worth studying — but as its own named
+      severity axis, not smuggled in through a chain.
 - [ ] Cross-generator evaluation using `--holdout-generators`. NOTE: val will
       mix seen and unseen generators, so a single val AUC does not isolate
       unseen-generator performance. The eval step must filter val to the
