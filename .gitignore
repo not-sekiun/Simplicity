@@ -12,8 +12,10 @@ wheels/
 # Data (downloaded datasets, generated splits/manifests, previews)
 data/raw/**
 data/processed/**
+data/demo_val/**
 !data/raw/.gitkeep
 !data/processed/.gitkeep
+!data/demo_val/.gitkeep
 *.png
 !docs/**/*.png
 checkpoints/

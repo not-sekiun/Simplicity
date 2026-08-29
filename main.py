@@ -11,6 +11,12 @@ Subcommands:
     preview-augment [--n N] [--out PATH]
                                       Save a grid image sanity-checking the augmentation
                                       pipeline (requires a train split to exist).
+    download-demo coco-val2017       Download the self-reported demo-val "real" half.
+    download-demo wildfake-dalle-advanced
+                                      Index the demo-val "AIGC" half (manual fetch required
+                                      first — see scripts/download_demo_val.py docstring).
+    build-demo-val                   Merge demo-val indexes into data/demo_val/demo_val.csv.
+                                      NEVER used for training — see 5.4 in the brief.
 
 Examples:
     uv run main.py check-env
@@ -28,7 +34,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
-from aigc_detect.config import PROCESSED_DIR, RAW_DIR, RANDOM_SEED, TRAIN_MANIFEST, VAL_FRACTION, VAL_MANIFEST  # noqa: E402
+from aigc_detect.config import (  # noqa: E402
+    DEMO_VAL_DIR,
+    DEMO_VAL_MANIFEST,
+    PROCESSED_DIR,
+    RANDOM_SEED,
+    RAW_DIR,
+    TRAIN_MANIFEST,
+    VAL_FRACTION,
+    VAL_MANIFEST,
+)
 
 
 def cmd_check_env(_args):
@@ -54,6 +69,16 @@ def cmd_check_env(_args):
     print(f"train manifest: {'OK - ' + str(TRAIN_MANIFEST) if TRAIN_MANIFEST.exists() else 'missing -- run `main.py split`'}")
     print(f"val manifest:   {'OK - ' + str(VAL_MANIFEST) if VAL_MANIFEST.exists() else 'missing -- run `main.py split`'}")
 
+    print()
+    demo_index_files = sorted(DEMO_VAL_DIR.glob("*_index.csv")) if DEMO_VAL_DIR.exists() else []
+    if demo_index_files:
+        for f in demo_index_files:
+            print(f"demo-val index: {f.name}")
+    else:
+        print("demo-val index: none yet -- run `main.py download-demo coco-val2017`")
+    print(f"demo-val manifest (self-reported ONLY, never trained on): "
+          f"{'OK - ' + str(DEMO_VAL_MANIFEST) if DEMO_VAL_MANIFEST.exists() else 'missing -- run `main.py build-demo-val`'}")
+
 
 def cmd_download(args):
     from scripts.download_data import download_cifake, download_sid_set
@@ -76,6 +101,21 @@ def cmd_split(args):
     val_df.to_csv(VAL_MANIFEST, index=False)
     print(f"[split] train: {len(train_df)} rows -> {TRAIN_MANIFEST}")
     print(f"[split] val:   {len(val_df)} rows -> {VAL_MANIFEST}")
+
+
+def cmd_download_demo(args):
+    from scripts.download_demo_val import download_coco_val2017, index_wildfake_dalle_advanced
+
+    if args.which == "coco-val2017":
+        download_coco_val2017()
+    else:
+        index_wildfake_dalle_advanced()
+
+
+def cmd_build_demo_val(_args):
+    from scripts.make_demo_val import main as build_demo_val_main
+
+    build_demo_val_main()
 
 
 def cmd_preview_augment(args):
@@ -131,6 +171,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_preview.add_argument("--n", type=int, default=8)
     p_preview.add_argument("--out", default="augment_preview.png")
     p_preview.set_defaults(func=cmd_preview_augment)
+
+    p_download_demo = sub.add_parser(
+        "download-demo", help="Fetch the self-reported demo-val set (5.4) — never used for training."
+    )
+    ddsub = p_download_demo.add_subparsers(dest="which", required=True)
+    ddsub.add_parser("coco-val2017")
+    ddsub.add_parser("wildfake-dalle-advanced")
+    p_download_demo.set_defaults(func=cmd_download_demo)
+
+    sub.add_parser(
+        "build-demo-val", help="Merge demo-val indexes into data/demo_val/demo_val.csv (no split)."
+    ).set_defaults(func=cmd_build_demo_val)
 
     return parser
 

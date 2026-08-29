@@ -68,17 +68,68 @@ uv run main.py preview-augment --n 8                   # sanity-check the aug pi
   `label=2` ("tampered") is a region-manipulation category, out of scope for
   this binary real-vs-AIGC task, and is skipped by default
   (`--include-tampered` to fold it into the AIGC class instead).
-- **WildFake** (ModelScope) is in the brief's dataset list but is not wired
-  into `download_data.py` yet — the ModelScope dataset page requires manual
-  translation per the brief, so add it by hand under `data/raw/wildfake/`
-  with an `wildfake_index.csv` (columns `image_path,label,source`) matching
-  the schema the other two sources produce, then re-run `main.py split`.
+- **WildFake** (ModelScope) as an additional *training* source is in the
+  brief's dataset list but not wired into `download_data.py` yet — add it by
+  hand under `data/raw/wildfake/` with a `wildfake_index.csv` (columns
+  `image_path,label,source`) matching the schema the other two sources
+  produce, then re-run `main.py split`. (This is separate from WildFake's
+  "DALL·E Advanced" subset used in the self-reported demo-val set below —
+  same manual-fetch constraint, different destination directory/purpose.)
 
 Each `download` call writes `data/raw/<source>_index.csv`
 (`image_path,label,source`; label 0=real, 1=AIGC). `main.py split` merges
 every `*_index.csv` under `data/raw/` and writes a single stratified
 `data/processed/{train,val}.csv` (stratified per source+label so each
 dataset's class balance is preserved in both splits).
+
+## Demo validation set (self-reported only — never trained on)
+
+The brief (5.4) defines a separate "Validation Dataset (for Demonstration
+Purposes Only)": COCO val2017 (non-AIGC, ~4998 imgs) + WildFake's "DALL·E
+Advanced" subset (AIGC, ~8843 imgs). It **does not contribute to scoring**
+and the brief explicitly says **"do not use the following data during
+training."** We treat it as periodic, read-only checkpoint eval — never
+part of any train/val split, never a target for hyperparameter tuning
+(only the internal `train.csv`/`val.csv` split from CIFAKE+SID_Set drives
+actual iteration; see "Which split to use" below).
+
+To keep the "never trained on" guarantee structural rather than just a
+convention: this data lives under `data/demo_val/`, a directory
+`scripts/make_splits.py` never looks at (it only globs `data/raw/`).
+
+```bash
+uv run main.py download-demo coco-val2017              # direct download, no auth
+uv run main.py download-demo wildfake-dalle-advanced   # indexes a manual download (see below)
+uv run main.py build-demo-val                          # merges both into data/demo_val/demo_val.csv
+```
+
+- **COCO val2017** downloads directly from the public COCO S3 bucket
+  (~815MB, no auth). Standard val2017 has 5000 images; the brief cites 4998,
+  so we index the full standard set as a stated assumption (off by ≤2 of
+  ~5000) rather than guess which 2 to exclude.
+- **WildFake "DALL·E Advanced"** does **not** download automatically: this
+  network cannot reach ModelScope's API or SDK endpoints at all — both
+  `curl` against `modelscope.cn/api/v1/...` and the `modelscope` Python
+  SDK's `HubApi` hang indefinitely, even though the plain website loads.
+  This matches the brief's own note that the ModelScope page needs a
+  manual translate-button step. To get this half:
+  1. Open https://modelscope.cn/datasets/hy2628982280/WildFake/summary
+  2. Use the page's translate button if needed
+  3. Find/download the "DALL·E Advanced" generator subset
+  4. Extract its images into `data/demo_val/wildfake_dalle_advanced/`
+  5. Run `uv run main.py download-demo wildfake-dalle-advanced` to index it
+- `build-demo-val` also runs a **leakage guard**: it warns if any demo-val
+  image filename collides with one already in `train.csv`/`val.csv`.
+
+### Which split to use, when
+
+Use the internal 85/15 `train.csv`/`val.csv` (CIFAKE + SID_Set) for
+everything during development — training itself, early stopping, and
+hyperparameter/model selection. Only evaluate against `demo_val.csv`
+periodically (e.g. once per saved checkpoint) to produce the "iterative
+improvement" numbers the write-up wants; don't let it drive decisions, since
+it's your only external benchmark and tuning against it would just mean
+overfitting to it by another name.
 
 ## Data augmentation / robustness pipeline
 

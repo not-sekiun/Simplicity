@@ -12,6 +12,14 @@ PROCESSED_DIR = DATA_DIR / "processed"
 TRAIN_MANIFEST = PROCESSED_DIR / "train.csv"
 VAL_MANIFEST = PROCESSED_DIR / "val.csv"
 
+# Self-reported "demonstration purposes only" benchmark (challenge brief 5.4):
+# COCO val2017 (real) + WildFake "DALL·E Advanced" subset (AIGC). Kept under a
+# directory separate from RAW_DIR/PROCESSED_DIR on purpose — the brief says
+# explicitly not to train on it, so it must never be picked up by
+# scripts/make_splits.py (which only globs RAW_DIR).
+DEMO_VAL_DIR = DATA_DIR / "demo_val"
+DEMO_VAL_MANIFEST = DEMO_VAL_DIR / "demo_val.csv"
+
 # Canonical labels used everywhere in the pipeline.
 LABEL_REAL = 0
 LABEL_AIGC = 1
