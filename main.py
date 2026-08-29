@@ -22,6 +22,16 @@ Subcommands:
                                       stats + a blind-probe canary for label shortcuts
                                       (e.g. aspect ratio). --transform runs the probe on
                                       build_eval_transform() tensors instead of raw images.
+    list-backbones                   List registered frozen-backbone keys (see
+                                      src/aigc_detect/backbones.py).
+    embed --backbone KEY --manifest {train,val} [--force] [--limit N]
+                                      Precompute + cache pooled embeddings for a manifest
+                                      under data/embeddings/. Implements the "Simplicity
+                                      Prevails" (arXiv:2602.01738) preprocessing recipe.
+    train-head --backbone KEY [--head linear|mlp] [--epochs E] [--lr LR]
+               [--batch-size B]
+                                      Train a classifier head on cached embeddings for
+                                      KEY (run `embed` for both train and val first).
 
 Examples:
     uv run main.py check-env
@@ -158,6 +168,59 @@ def cmd_preview_augment(args):
     print(f"Saved augmentation preview grid ({n} samples) -> {args.out}")
 
 
+def cmd_list_backbones(_args):
+    from aigc_detect.backbones import BACKBONE_REGISTRY, list_backbones
+
+    for key in list_backbones():
+        entry = BACKBONE_REGISTRY[key]
+        print(
+            f"{key:12s} checkpoint={entry['checkpoint']:55s} loader={entry['loader']:12s} "
+            f"pooled_dim={entry['pooled_dim']:5d} native_res={entry['native_res']}"
+        )
+
+
+def cmd_embed(args):
+    from aigc_detect.embed import precompute_embeddings
+
+    manifest = TRAIN_MANIFEST if args.manifest == "train" else VAL_MANIFEST
+    if not manifest.exists():
+        print(f"No {args.manifest} manifest at {manifest}. Run `main.py split` first.")
+        sys.exit(1)
+
+    precompute_embeddings(
+        manifest_path=manifest,
+        backbone_key=args.backbone,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        force=args.force,
+        limit=args.limit,
+    )
+
+
+def cmd_train_head(args):
+    from aigc_detect.embed import embeddings_path
+    from aigc_detect.train_head import train_head
+
+    train_npz = embeddings_path(args.backbone, TRAIN_MANIFEST)
+    val_npz = embeddings_path(args.backbone, VAL_MANIFEST)
+    for p, name in [(train_npz, "train"), (val_npz, "val")]:
+        if not p.exists():
+            print(f"No cached {name} embeddings at {p}. Run `main.py embed --backbone {args.backbone} "
+                  f"--manifest {name}` first.")
+            sys.exit(1)
+
+    train_head(
+        train_npz=train_npz,
+        val_npz=val_npz,
+        backbone_key=args.backbone,
+        head_kind=args.head,
+        epochs=args.epochs,
+        lr=args.lr,
+        batch_size=args.batch_size,
+        weight_decay=args.weight_decay,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -206,6 +269,34 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_audit.add_argument("--seed", type=int, default=RANDOM_SEED)
     p_audit.set_defaults(func=cmd_audit_data)
+
+    sub.add_parser(
+        "list-backbones", help="List registered frozen-backbone keys (src/aigc_detect/backbones.py)."
+    ).set_defaults(func=cmd_list_backbones)
+
+    p_embed = sub.add_parser(
+        "embed", help='Precompute + cache pooled embeddings for a manifest under data/embeddings/.'
+    )
+    p_embed.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
+    p_embed.add_argument("--manifest", required=True, choices=["train", "val"])
+    p_embed.add_argument("--batch-size", type=int, default=64)
+    p_embed.add_argument("--num-workers", type=int, default=4)
+    p_embed.add_argument("--force", action="store_true", help="Recompute even if the cached .npz already exists.")
+    p_embed.add_argument(
+        "--limit", type=int, default=None, help="Only embed the first N rows of the manifest (for quick trials)."
+    )
+    p_embed.set_defaults(func=cmd_embed)
+
+    p_train_head = sub.add_parser(
+        "train-head", help="Train a classifier head on cached embeddings (run `embed` for train+val first)."
+    )
+    p_train_head.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
+    p_train_head.add_argument("--head", default="linear", choices=["linear", "mlp"])
+    p_train_head.add_argument("--epochs", type=int, default=2)
+    p_train_head.add_argument("--lr", type=float, default=1e-3)
+    p_train_head.add_argument("--batch-size", type=int, default=128)
+    p_train_head.add_argument("--weight-decay", type=float, default=0.0)
+    p_train_head.set_defaults(func=cmd_train_head)
 
     return parser
 

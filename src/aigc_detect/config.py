@@ -20,6 +20,10 @@ VAL_MANIFEST = PROCESSED_DIR / "val.csv"
 DEMO_VAL_DIR = DATA_DIR / "demo_val"
 DEMO_VAL_MANIFEST = DEMO_VAL_DIR / "demo_val.csv"
 
+# Cached frozen-backbone pooled embeddings (Wave 2: "Simplicity Prevails"
+# recipe). One .npz per (backbone, manifest) pair -- see aigc_detect/embed.py.
+EMBEDDINGS_DIR = DATA_DIR / "embeddings"
+
 # Canonical labels used everywhere in the pipeline.
 LABEL_REAL = 0
 LABEL_AIGC = 1

@@ -17,6 +17,8 @@ dependencies = [
     "kagglehub",
     "datasets",
     "huggingface-hub",
+    "timm>=1.0.29",
+    "transformers>=5.16.1",
 ]
 
 [tool.uv.sources]
