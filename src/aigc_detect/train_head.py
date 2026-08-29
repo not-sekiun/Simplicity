@@ -18,7 +18,7 @@ import torch.nn as nn
 from sklearn.metrics import balanced_accuracy_score, roc_auc_score
 from torch.utils.data import DataLoader, TensorDataset
 
-from aigc_detect.config import ROOT_DIR
+from aigc_detect.config import ROOT_DIR, TRAIN_MANIFEST, VAL_MANIFEST
 from aigc_detect.heads import build_head
 
 
@@ -34,6 +34,31 @@ def _standardize(x: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.ndarray
     return (x - mean) / std
 
 
+def _assert_fresh(npz_path: Path, manifest_path: Path, tag: str) -> None:
+    """Refuse to train on embeddings whose manifest has changed since they were
+    computed. See FINDINGS.md trap 7 -- a stale cache here is silent and every
+    downstream metric would be wrong but plausible."""
+    import numpy as _np
+
+    from aigc_detect.embed import manifest_fingerprint
+
+    with _np.load(npz_path, allow_pickle=True) as d:
+        cached = str(d["manifest_fingerprint"]) if "manifest_fingerprint" in d else None
+    if cached is None:
+        raise SystemExit(
+            f"[train-head] {npz_path.name} has no manifest fingerprint (written before that "
+            f"check existed). Re-run: uv run main.py embed --backbone <key> --manifest {tag} --force"
+        )
+    current = manifest_fingerprint(manifest_path)
+    if cached != current:
+        raise SystemExit(
+            f"[train-head] STALE EMBEDDINGS: {npz_path.name} was computed from a different "
+            f"{tag} manifest than {manifest_path} holds now (the split was rebuilt). "
+            f"Re-run: uv run main.py embed --backbone <key> --manifest {tag} --force"
+        )
+    print(f"[train-head] {tag} embeddings match {manifest_path.name} (fingerprint OK)")
+
+
 def train_head(
     train_npz: str | Path,
     val_npz: str | Path,
@@ -47,6 +72,14 @@ def train_head(
 ):
     train_npz, val_npz = Path(train_npz), Path(val_npz)
     device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # `main.py split` rewrites train.csv/val.csv in place, so a cached .npz can
+    # belong to a completely different set of images while keeping its filename.
+    # embed.py fingerprints the manifest it embedded; refuse to train if that no
+    # longer matches, because the failure is otherwise silent and the resulting
+    # metrics look entirely plausible. See FINDINGS.md trap 7.
+    _assert_fresh(train_npz, TRAIN_MANIFEST, "train")
+    _assert_fresh(val_npz, VAL_MANIFEST, "val")
 
     train_emb, train_labels, train_sources, train_meta = _load_npz(train_npz)
     val_emb, val_labels, val_sources, _ = _load_npz(val_npz)

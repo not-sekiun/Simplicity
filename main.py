@@ -6,8 +6,16 @@ Subcommands:
     download cifake                  Download CIFAKE in full (Kaggle).
     download sid-set [--limit-per-class N]
                                       Stream a capped subset of SID_Set (HuggingFace).
-    split [--val-fraction F] [--seed S]
-                                      Build stratified data/processed/{train,val}.csv.
+    download tiny-genimage [--limit-per-split N] [--force]
+                                      Download Tiny-GenImage (HuggingFace): HF "train" ->
+                                      data/raw/ (training pool), HF "validation" ->
+                                      data/heldout/ (cross-generator test set, never
+                                      trained on). Re-encodes every image as JPEG q95.
+    split [--val-fraction F] [--seed S] [--exclude-source SOURCE ...]
+          [--max-per-source N] [--holdout-generators G [G ...]]
+                                      Build stratified data/processed/{train,val}.csv from
+                                      data/raw/*_index.csv only (never data/heldout/ or
+                                      data/demo_val/).
     preview-augment [--n N] [--out PATH]
                                       Save a grid image sanity-checking the augmentation
                                       pipeline (requires a train split to exist).
@@ -17,6 +25,9 @@ Subcommands:
                                       first - see scripts/download_demo_val.py docstring).
     build-demo-val                   Merge demo-val indexes into data/demo_val/demo_val.csv.
                                       NEVER used for training - see 5.4 in the brief.
+    build-heldout                    Merge data/heldout/*_index.csv into
+                                      data/heldout/heldout.csv. Cross-generator test set,
+                                      NEVER used for training.
     audit-data [--sample N] [--transform]
                                       Shortcut audit of data/raw/*_index.csv: per-source
                                       stats + a blind-probe canary for label shortcuts
@@ -38,6 +49,7 @@ Examples:
     uv run main.py check-env
     uv run main.py download cifake
     uv run main.py download sid-set --limit-per-class 4000
+    uv run main.py download tiny-genimage --limit-per-split 40
     uv run main.py split
     uv run main.py preview-augment --n 8
 """
@@ -53,6 +65,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 from aigc_detect.config import (  # noqa: E402
     DEMO_VAL_DIR,
     DEMO_VAL_MANIFEST,
+    HELDOUT_DIR,
+    HELDOUT_MANIFEST,
     PROCESSED_DIR,
     RANDOM_SEED,
     RAW_DIR,
@@ -86,6 +100,16 @@ def cmd_check_env(_args):
     print(f"val manifest:   {'OK - ' + str(VAL_MANIFEST) if VAL_MANIFEST.exists() else 'missing -- run `main.py split`'}")
 
     print()
+    heldout_index_files = sorted(HELDOUT_DIR.glob("*_index.csv")) if HELDOUT_DIR.exists() else []
+    if heldout_index_files:
+        for f in heldout_index_files:
+            print(f"heldout index:  {f.name}")
+    else:
+        print("heldout index:  none yet -- run `main.py download tiny-genimage`")
+    print(f"heldout manifest (cross-generator test, never trained on): "
+          f"{'OK - ' + str(HELDOUT_MANIFEST) if HELDOUT_MANIFEST.exists() else 'missing -- run `main.py build-heldout`'}")
+
+    print()
     demo_index_files = sorted(DEMO_VAL_DIR.glob("*_index.csv")) if DEMO_VAL_DIR.exists() else []
     if demo_index_files:
         for f in demo_index_files:
@@ -98,19 +122,27 @@ def cmd_check_env(_args):
 
 def cmd_download(args):
     from scripts.download_data import download_cifake, download_sid_set
+    from scripts.download_tiny_genimage import download_tiny_genimage
 
     if args.dataset == "cifake":
         download_cifake()
     elif args.dataset == "sid-set":
         download_sid_set(limit_per_class=args.limit_per_class, include_tampered=args.include_tampered, split=args.split)
+    elif args.dataset == "tiny-genimage":
+        download_tiny_genimage(limit_per_split=args.limit_per_split, force=args.force)
 
 
 def cmd_split(args):
-    from scripts.make_splits import load_indexes, stratified_split
+    from scripts.make_splits import cap_per_source, filter_sources, holdout_generators, load_indexes, stratified_split
 
     df = load_indexes()
     print(f"[split] loaded {len(df)} indexed images across sources: {df['source'].value_counts().to_dict()}")
+
+    df = filter_sources(df, args.exclude_source)
+    df = cap_per_source(df, args.max_per_source, args.seed)
+
     train_df, val_df = stratified_split(df, args.val_fraction, args.seed)
+    train_df, val_df = holdout_generators(train_df, val_df, args.holdout_generators)
 
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     train_df.to_csv(TRAIN_MANIFEST, index=False)
@@ -132,6 +164,12 @@ def cmd_build_demo_val(_args):
     from scripts.make_demo_val import main as build_demo_val_main
 
     build_demo_val_main()
+
+
+def cmd_build_heldout(_args):
+    from scripts.make_heldout import main as build_heldout_main
+
+    build_heldout_main()
 
 
 def cmd_audit_data(args):
@@ -185,10 +223,15 @@ def cmd_embed(args):
 
     # demo-val is embeddable for EVALUATION ONLY (brief 5.4 forbids training on
     # it). train_head never looks at it -- it hardcodes TRAIN_MANIFEST/VAL_MANIFEST.
-    manifests = {"train": TRAIN_MANIFEST, "val": VAL_MANIFEST, "demo-val": DEMO_VAL_MANIFEST}
+    manifests = {
+        "train": TRAIN_MANIFEST,
+        "val": VAL_MANIFEST,
+        "heldout": HELDOUT_MANIFEST,
+        "demo-val": DEMO_VAL_MANIFEST,
+    }
     manifest = manifests[args.manifest]
     if not manifest.exists():
-        hint = "build-demo-val" if args.manifest == "demo-val" else "split"
+        hint = {"demo-val": "build-demo-val", "heldout": "build-heldout"}.get(args.manifest, "split")
         print(f"No {args.manifest} manifest at {manifest}. Run `main.py {hint}` first.")
         sys.exit(1)
 
@@ -239,11 +282,27 @@ def build_parser() -> argparse.ArgumentParser:
     sid.add_argument("--limit-per-class", type=int, default=4000)
     sid.add_argument("--split", default="train", choices=["train", "validation"])
     sid.add_argument("--include-tampered", action="store_true")
+    tgi = dsub.add_parser("tiny-genimage")
+    tgi.add_argument("--limit-per-split", type=int, default=None,
+                      help="Only download the first N images of each HF split (default: all).")
+    tgi.add_argument("--force", action="store_true", help="Re-encode images even if already written.")
     p_download.set_defaults(func=cmd_download)
 
     p_split = sub.add_parser("split", help="Build stratified train/val manifests.")
     p_split.add_argument("--val-fraction", type=float, default=VAL_FRACTION)
     p_split.add_argument("--seed", type=int, default=RANDOM_SEED)
+    p_split.add_argument(
+        "--exclude-source", action="append", default=None, metavar="SOURCE",
+        help="Drop a source entirely before splitting (repeatable), e.g. --exclude-source sid_set.",
+    )
+    p_split.add_argument(
+        "--max-per-source", type=int, default=None,
+        help="Cap rows per source by random subsample (seeded), before splitting.",
+    )
+    p_split.add_argument(
+        "--holdout-generators", nargs="+", default=None, metavar="GENERATOR",
+        help="Move all rows for these generators out of train and into val (unseen-generator eval).",
+    )
     p_split.set_defaults(func=cmd_split)
 
     p_preview = sub.add_parser("preview-augment", help="Save a grid image sanity-checking the aug pipeline.")
@@ -262,6 +321,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser(
         "build-demo-val", help="Merge demo-val indexes into data/demo_val/demo_val.csv (no split)."
     ).set_defaults(func=cmd_build_demo_val)
+
+    sub.add_parser(
+        "build-heldout", help="Merge data/heldout/*_index.csv into data/heldout/heldout.csv (no split)."
+    ).set_defaults(func=cmd_build_heldout)
 
     p_audit = sub.add_parser(
         "audit-data", help="Shortcut audit of data/raw/*_index.csv (aspect ratio, blind probe canary)."
@@ -283,7 +346,7 @@ def build_parser() -> argparse.ArgumentParser:
         "embed", help='Precompute + cache pooled embeddings for a manifest under data/embeddings/.'
     )
     p_embed.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
-    p_embed.add_argument("--manifest", required=True, choices=["train", "val", "demo-val"])
+    p_embed.add_argument("--manifest", required=True, choices=["train", "val", "heldout", "demo-val"])
     p_embed.add_argument("--batch-size", type=int, default=64)
     p_embed.add_argument("--num-workers", type=int, default=4)
     p_embed.add_argument("--force", action="store_true", help="Recompute even if the cached .npz already exists.")

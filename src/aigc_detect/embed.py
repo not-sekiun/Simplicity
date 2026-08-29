@@ -11,9 +11,11 @@ Cache location: data/embeddings/<backbone_key>__<manifest_stem>.npz
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 from torchvision.transforms import v2
@@ -30,6 +32,25 @@ def embeddings_path(backbone_key: str, manifest_path: str | Path) -> Path:
     return EMBEDDINGS_DIR / f"{backbone_key}__{manifest_stem}.npz"
 
 
+def manifest_fingerprint(manifest_path: str | Path, limit: int | None = None) -> str:
+    """SHA1 over the manifest's image_path column (in order), so a cached .npz
+    can be invalidated when the manifest changes.
+
+    The cache filename is only <backbone>__<manifest stem>.npz, and re-running
+    `main.py split` with different flags rewrites train.csv/val.csv in place --
+    same filename, different images. Without this check a stale cache would be
+    silently reused and every downstream metric would be wrong.
+    """
+    df = pd.read_csv(manifest_path, usecols=["image_path"])
+    if limit is not None and limit < len(df):
+        df = df.iloc[:limit]
+    h = hashlib.sha1()
+    for p in df["image_path"]:
+        h.update(str(p).encode("utf-8", "replace"))
+        h.update(b"\n")
+    return h.hexdigest()
+
+
 def precompute_embeddings(
     manifest_path: str | Path,
     backbone_key: str,
@@ -42,9 +63,18 @@ def precompute_embeddings(
     manifest_path = Path(manifest_path)
     out_path = Path(out_path) if out_path is not None else embeddings_path(backbone_key, manifest_path)
 
+    fingerprint = manifest_fingerprint(manifest_path, limit)
     if out_path.exists() and not force:
-        print(f"[embed] {out_path} already exists -- skipping (use --force to recompute)")
-        return out_path
+        try:
+            cached = np.load(out_path, allow_pickle=True)
+            cached_fp = str(cached["manifest_fingerprint"]) if "manifest_fingerprint" in cached else None
+        except Exception:  # noqa: BLE001 - unreadable cache is treated as stale
+            cached_fp = None
+        if cached_fp == fingerprint:
+            print(f"[embed] {out_path} already exists and matches the manifest -- skipping")
+            return out_path
+        reason = "no fingerprint (written before this check existed)" if cached_fp is None else "manifest changed"
+        print(f"[embed] {out_path} is STALE ({reason}) -- recomputing")
 
     module, pooled_dim, native_res = load_backbone(backbone_key)
     print(
@@ -102,6 +132,7 @@ def precompute_embeddings(
         pooled_dim=pooled_dim,
         manifest_path=str(manifest_path),
         n_rows=n,
+        manifest_fingerprint=fingerprint,
         norm_mean=module.norm_mean,
         norm_std=module.norm_std,
         norm_source=module.norm_source,
