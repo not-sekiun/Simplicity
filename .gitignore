@@ -41,3 +41,11 @@ Thumbs.db
 # OOD evaluation tier (downloaded, evaluation only)
 data/ood/**
 !data/ood/.gitkeep
+
+# Error analysis outputs (deliverable 5.5.5) - regenerable
+reports/error_analysis/**
+!reports/error_analysis/*.md
+!reports/error_analysis/*.csv
+
+# Extended training slice (downloaded)
+data/train_ext/**

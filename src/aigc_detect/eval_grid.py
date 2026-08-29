@@ -61,7 +61,7 @@ from aigc_detect.transforms import (
 )
 
 
-def _best_balanced_threshold(labels: np.ndarray, probs: np.ndarray) -> float:
+def best_balanced_threshold(labels: np.ndarray, probs: np.ndarray) -> float:
     """Threshold maximizing balanced accuracy on the CLEAN view, then frozen for
     every other view (module docstring, choice 1).
 
@@ -182,7 +182,7 @@ def evaluate_grid(
         raise SystemExit("[eval-grid] the 'clean' view is not cached; it defines the threshold and AUC_clean.")
 
     clean = by_name["clean"]
-    threshold = _best_balanced_threshold(clean["labels"], clean["probs"])
+    threshold = best_balanced_threshold(clean["labels"], clean["probs"])
     print(f"[eval-grid] fixed threshold {threshold:.4f} (balanced-accuracy optimum on the clean view)")
     print(f"[eval-grid] n={len(clean['labels'])} rows, label counts "
           f"{dict(zip(*np.unique(clean['labels'], return_counts=True)))}\n")
