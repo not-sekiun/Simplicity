@@ -17,6 +17,11 @@ Subcommands:
                                       first — see scripts/download_demo_val.py docstring).
     build-demo-val                   Merge demo-val indexes into data/demo_val/demo_val.csv.
                                       NEVER used for training — see 5.4 in the brief.
+    audit-data [--sample N] [--transform]
+                                      Shortcut audit of data/raw/*_index.csv: per-source
+                                      stats + a blind-probe canary for label shortcuts
+                                      (e.g. aspect ratio). --transform runs the probe on
+                                      build_eval_transform() tensors instead of raw images.
 
 Examples:
     uv run main.py check-env
@@ -118,6 +123,12 @@ def cmd_build_demo_val(_args):
     build_demo_val_main()
 
 
+def cmd_audit_data(args):
+    from scripts.audit_data import run_audit
+
+    run_audit(sample=args.sample, use_transform=args.transform, seed=args.seed)
+
+
 def cmd_preview_augment(args):
     from aigc_detect.dataset import ManifestImageDataset
     from aigc_detect.transforms import build_train_transform
@@ -183,6 +194,18 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser(
         "build-demo-val", help="Merge demo-val indexes into data/demo_val/demo_val.csv (no split)."
     ).set_defaults(func=cmd_build_demo_val)
+
+    p_audit = sub.add_parser(
+        "audit-data", help="Shortcut audit of data/raw/*_index.csv (aspect ratio, blind probe canary)."
+    )
+    p_audit.add_argument("--sample", type=int, default=600, help="Max images sampled per (source, label) group.")
+    p_audit.add_argument(
+        "--transform",
+        action="store_true",
+        help="Run the blind probe on build_eval_transform() tensors instead of raw images.",
+    )
+    p_audit.add_argument("--seed", type=int, default=RANDOM_SEED)
+    p_audit.set_defaults(func=cmd_audit_data)
 
     return parser
 

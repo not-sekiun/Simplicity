@@ -20,6 +20,18 @@ Two pipelines are exposed:
     (transform, severity) combination in the table, plus "clean", for the
     robustness evaluation summary deliverable (5.5.4): apply each in isolation
     at a fixed severity so clean-vs-transformed accuracy is directly comparable.
+
+Resize tail (``build_backbone_transform``): all three pipelines above end in
+an *aspect-preserving* resize-shortest-side + square crop, not a plain
+``Resize((S, S))``. A non-aspect-preserving square resize anisotropically
+stretches every non-square image, and in this project's data that stretch is
+almost a perfect label proxy on its own (SID_Set's AIGC images are ~100%
+exactly 1024x1024 square; its real photos are ~96% non-square) --
+`scripts/audit_data.py`'s blind probe measured ~0.95-0.97 balanced accuracy
+from a 16x16-grayscale vector alone, i.e. a model could "solve" real-vs-AIGC
+by looking at aspect ratio and never at content. Resizing the shortest side
+and center/random-cropping to a square removes that shortcut while keeping
+every image at the required IMAGE_SIZE x IMAGE_SIZE tensor shape.
 """
 
 from __future__ import annotations
@@ -191,6 +203,20 @@ class _MaybeNoise:
 # ---------------------------------------------------------------------------
 
 
+def build_backbone_transform(image_size: int = IMAGE_SIZE) -> list:
+    """Aspect-preserving resize of the shortest side followed by a square
+    center crop. Replaces the non-aspect-preserving Resize((S, S)) tail --
+    see the module docstring for why that tail was a label shortcut.
+
+    Returns a plain list of v2 transforms (not a Compose) so callers can
+    splice it into a larger pipeline alongside PIL-domain augmentation steps.
+    """
+    return [
+        v2.Resize(image_size, antialias=True),  # int -> resizes shortest side, preserves aspect
+        v2.CenterCrop(image_size),
+    ]
+
+
 def build_train_transform(image_size: int = IMAGE_SIZE, robustness_p: float = 0.8) -> v2.Compose:
     """Training pipeline: standard light aug + stochastic real-world degradations."""
     aug = RobustnessAugment(p_any=robustness_p)
@@ -198,7 +224,8 @@ def build_train_transform(image_size: int = IMAGE_SIZE, robustness_p: float = 0.
         [
             v2.RandomHorizontalFlip(p=0.5),
             aug,  # PIL-domain: jpeg/blur/resize/color-jitter/center-crop (maybe none)
-            v2.Resize((image_size, image_size), antialias=True),
+            v2.Resize(image_size, antialias=True),  # shortest side, aspect-preserving
+            v2.RandomCrop(image_size, pad_if_needed=True),  # crop diversity at train time
             v2.ToImage(),
             v2.ToDtype(torch.float32, scale=True),
             _MaybeNoise(aug.noise, p=robustness_p * 0.5),
@@ -208,11 +235,12 @@ def build_train_transform(image_size: int = IMAGE_SIZE, robustness_p: float = 0.
 
 
 def build_eval_transform(image_size: int = IMAGE_SIZE) -> v2.Compose:
-    """Deterministic "clean" pipeline: resize + normalize only. Used for local
-    validation accuracy and as the baseline row of the robustness summary."""
+    """Deterministic "clean" pipeline: aspect-preserving resize + center crop +
+    normalize. Used for local validation accuracy and as the baseline row of
+    the robustness summary."""
     return v2.Compose(
         [
-            v2.Resize((image_size, image_size), antialias=True),
+            *build_backbone_transform(image_size),
             v2.ToImage(),
             v2.ToDtype(torch.float32, scale=True),
             v2.Normalize(mean=NORM_MEAN, std=NORM_STD),
@@ -228,7 +256,7 @@ def build_robustness_eval_transforms(image_size: int = IMAGE_SIZE) -> dict[str, 
     clean-vs-transformed accuracy per 5.5.4 (Robustness Evaluation Summary).
     """
     base_post = [v2.ToImage(), v2.ToDtype(torch.float32, scale=True), v2.Normalize(mean=NORM_MEAN, std=NORM_STD)]
-    resize_step = v2.Resize((image_size, image_size), antialias=True)
+    resize_step = v2.Compose(build_backbone_transform(image_size))  # shortest-side resize + center crop
 
     pipelines: dict[str, v2.Compose] = {
         "clean": v2.Compose([resize_step, *base_post]),
