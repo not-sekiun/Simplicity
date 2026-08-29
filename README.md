@@ -5,14 +5,22 @@ Robust detection of AI-generated images under real-world transformations
 
 ## Status
 
-Environment, dataset download/indexing scripts, and the data augmentation /
-robustness-eval transform pipeline are built and verified. Local data is
-downloaded: **CIFAKE** (full, 120k images) + **SID_Set** (4000/class subset,
-8k images) are indexed and split into `data/processed/{train,val}.csv`
-(108,800 train / 19,200 val, stratified by source+label). The self-reported
-**demo-val** set (5.4) has its COCO val2017 half downloaded and built
-(5000 images); the WildFake "DALL·E Advanced" half is pending manual fetch
-(see below). Model training/inference code is not built yet.
+Environment, dataset download/indexing, the augmentation / robustness-eval
+transform pipeline, a data-shortcut audit, and the frozen-backbone +
+probe-head model pipeline are built and verified. Local data: **CIFAKE**
+(full, 120k) + **SID_Set** (4000/class, 8k) indexed and split into
+`data/processed/{train,val}.csv` (108,800 / 19,200). The self-reported
+**demo-val** set (5.4) has its COCO val2017 half built (5000 images); the
+WildFake "DALL·E Advanced" half is pending manual fetch (see below).
+
+> **⚠ Read [FINDINGS.md](FINDINGS.md) before trusting any metric from this
+> repo.** SID_Set was found to carry a composition shortcut — its real
+> (OpenImages) and AI (FLUX) halves are separable at 0.93 balanced accuracy
+> from an 8×8 greyscale thumbnail — so it is **not usable as training
+> data**, and a model trained on it transfers to CIFAKE at chance. A
+> separate aspect-ratio shortcut was found and fixed. Replacement training
+> source identified: `TheKernel01/Tiny-GenImage` (content-matched, 8
+> generators). Data replacement is the current blocking task.
 
 ## Setup
 
@@ -168,11 +176,34 @@ Verified with `uv run main.py preview-augment` against a synthetic manifest;
 all 15 pipelines (`clean` + 4 JPEG + 3 blur + 2 resize + 3 noise + color
 jitter + center crop) produce correctly-shaped `(3, 224, 224)` float tensors.
 
+## Model pipeline
+
+Frozen vision foundation model + probe head, per *Simplicity Prevails*
+(arXiv:2602.01738): a single linear layer on the pooled output of a frozen
+backbone (AdamW, lr 1e-3, batch 128, 2 epochs). Backbones are never
+fine-tuned — freezing is the mechanism, not a compute shortcut.
+
+```bash
+uv run main.py list-backbones                        # registry + dims + native res
+uv run main.py audit-data [--transform]              # shortcut audit + blind probe
+uv run main.py embed --backbone pe-core-l --manifest val [--limit N]
+uv run main.py train-head --backbone pe-core-l [--head linear|mlp]
+```
+
+Registry (all ungated on HuggingFace, vision tower only, asserted <2B params):
+`metaclip2-h` (1280-dim, 224px, 630.8M) · `dinov3-l` (1024, 256) ·
+`pe-core-l` (1024, 336, 316.1M) · `dinov2-g` (1536, 518).
+
+Embeddings cache to `data/embeddings/<backbone>__<manifest>.npz`, so head
+training takes seconds and ablations are essentially free.
+
 ## Not yet built
 
-- Model architecture + training loop (constraint: <2B parameters).
+- Tiny-GenImage ingestion + generator-aware splits (current blocking task).
 - Inference script emitting `{image_path, pred}` JSON per deliverable 5.5.2.
-- Robustness evaluation report / error analysis (5.5.4, 5.5.5).
+- Robustness evaluation report + `0.5*AUC_clean + 0.5*AUC_robust` scoring.
+- Calibration (temperature + threshold per degradation bucket).
+- Error analysis note (5.5.5).
 - WildFake ingestion (see note above).
 
 ## Team
