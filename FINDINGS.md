@@ -209,6 +209,149 @@ with no robustness transforms applied yet.
 
 ---
 
+## 2c. Tiny-GenImage ingested and audited (2026-08-29) -- the content shortcut is gone
+
+Ingested `TheKernel01/Tiny-GenImage`. HF `train` -> `data/raw/tiny_genimage/`
+(28,000 images, 14,000 real / 14,000 AIGC); HF `validation` -> `data/heldout/`
+(7,000, 3,500/3,500). Every image re-encoded to JPEG q95 on write, which closes
+the format shortcut by construction (verified decisively: a source PNG in the
+parquet lands on disk as JPEG).
+
+**Only 7 fake generators are actually present, not 8.** The ClassLabel declares
+`['Real','ADM','BigGAN','GLIDE','Midjourney','SD14','SD15','VQDM','Wukong']` but
+**SD14 has zero rows in either split**. Present: ADM, BigGAN, GLIDE, Midjourney,
+SD15, VQDM, Wukong -- 2,000 each in train, 500 each in heldout.
+
+**`data/heldout/` is an in-distribution test set, not a cross-generator one.**
+It contains the same 7 generators as train. For unseen-generator evaluation use
+`main.py split --holdout-generators`.
+
+### Shortcut audit -- compare across datasets within a row
+
+| Probe (geometry controlled) | SID_Set | CIFAKE | **Tiny-GenImage** |
+|---|---|---|---|
+| colour/tone only (6 nums) | 0.657 | 0.613 | **0.469** |
+| coarse layout 8x8 (64 nums) | **0.935** | 0.667 | **0.477** |
+| texture high-freq (4 nums) | 0.678 | 0.776 | **0.495** |
+
+All three at or below chance. **The content shortcut that made SID_Set unusable
+does not exist here** -- GenImage's fakes are generated from ImageNet class
+prompts against ImageNet reals, so both halves depict the same subjects.
+
+### The geometry skew is as bad as SID_Set's, but it is handled
+
+```
+label 0 (real): 4.3% square,  aspect p50 1.333, short side p50 375
+label 1 (AIGC): 100% square,  aspect p50 1.000, short side p50 256
+```
+
+Same structure as SID_Set's aspect shortcut. `build_backbone_transform`'s square
+crop removes it from the tensor -- and the probes above were run *with* that
+crop applied, which is why they sit at chance.
+
+### The residual frequency signal is real, not a resampling artifact
+
+Reals get **downscaled** to the backbone's input (375 -> 336) while fakes get
+**upscaled** (256 -> 336), so differing resample histories were a live concern.
+
+```
+A  current pipeline (crop -> 336, paths differ)      bacc=0.6055
+B  resampling-normalised (both 200 -> 336)           bacc=0.7227
+```
+
+**Normalising the resampling path made the signal stronger, not weaker.** A
+resampling shortcut would have collapsed toward chance under B; instead the
+differing paths were partly *masking* a genuine generator fingerprint. So the
+~0.6-0.72 is real frequency-domain signal of the kind frequency-based detectors
+are supposed to use, not a leak.
+
+**Open hypothesis, to settle in the robustness grid:** the fakes are natively
+square at fixed resolutions (256/512/1024), so part of this signal may be "was
+this generated at 256x256". If so it will degrade under the grid's resize
+0.5x/0.25x transforms. Measure it; do not assume either way.
+
+---
+
+## 2d. Training on clean data (2026-08-29) -- what the data swap actually bought
+
+Split: `main.py split --exclude-source sid_set --max-per-source 28000`
+(47,600 train / 8,400 val, CIFAKE and Tiny-GenImage equally weighted).
+Backbone `pe-core-l`, linear head, paper recipe.
+
+```
+val     (in-distribution)          n= 8400  AUC=0.9978  bacc=0.9786  FPR=0.021
+heldout (untouched, in-dist)       n= 7000  AUC=0.9985  bacc=0.9827  FPR=0.016
+demo-val (EXTERNAL, unseen gen)    n=13843  AUC=0.9947  bacc=0.9665  FPR=0.044
+```
+
+demo-val, like-for-like against the contaminated model on identical data:
+
+```
+contaminated (CIFAKE+SID_Set, 5k rows)  AUC=0.9529  bacc=0.8908  FPR=0.149
+clean        (CIFAKE+TinyGenImage)      AUC=0.9947  bacc=0.9665  FPR=0.044
+```
+
+False positives on real photos fell 14.9% -> 4.4%.
+
+### It was data quality, not data volume
+
+Two variables changed at once (data *and* 5,000 -> 47,600 rows), so this was
+size-matched at 5,000 rows. demo-val, sklearn logistic heads throughout so the
+rows are internally comparable:
+
+| Training data | rows | AUC | bacc | FPR |
+|---|---|---|---|---|
+| CIFAKE + SID_Set *(old)* | 5,000 | 0.9529 | 0.8908 | 0.149 |
+| CIFAKE + Tiny-GenImage | 5,000 | 0.9863 | 0.9395 | 0.079 |
+| **Tiny-GenImage only** | 5,000 | **0.9910** | 0.9534 | 0.029 |
+| CIFAKE only | 5,000 | 0.9410 | 0.8454 | 0.268 |
+| CIFAKE + Tiny-GenImage | 47,600 | 0.9919 | 0.9605 | 0.032 |
+| Tiny-GenImage only | 23,800 | 0.9907 | 0.9348 | 0.013 |
+
+At matched size the data swap alone moves 0.9529 -> 0.9910. Going 5,000 ->
+47,600 rows moved AUC only 0.9863 -> 0.9919. **Replacing SID_Set was the win;
+volume was nearly irrelevant.**
+
+### CIFAKE is actively harmful and was dropped
+
+Alone it reaches 0.93-0.94 AUC with a **22-27% false-positive rate**. Mixed into
+Tiny-GenImage it barely moves AUC (0.9907 -> 0.9919) while more than doubling
+FPR (0.013 -> 0.032). The 32x32 -> 336 upsampling domain gap damages calibration
+even where it does not damage ranking. Final training data is Tiny-GenImage
+only: `main.py split --exclude-source sid_set --exclude-source cifake`.
+
+### FINAL model: Tiny-GenImage only (23,800 train / 4,200 val)
+
+`main.py split --exclude-source sid_set --exclude-source cifake`, backbone
+`pe-core-l`, linear head, paper recipe. Saved to `models/pe-core-l__linear.pt`.
+
+```
+val      (in-distribution)        n= 4200  AUC=0.9996  bacc=0.9902  FPR=0.006  TPR=0.986
+heldout  (untouched, in-dist)     n= 7000  AUC=0.9997  bacc=0.9913  FPR=0.006  TPR=0.989
+demo-val (EXTERNAL, unseen gen)   n=13843  AUC=0.9949  bacc=0.9647  FPR=0.019  TPR=0.948
+```
+
+Dropping CIFAKE confirmed the ablation's prediction: demo-val AUC is unchanged
+(0.9947 -> 0.9949) but **FPR more than halves, 0.044 -> 0.019**. CIFAKE was
+damaging calibration without contributing ranking power.
+
+False-positive rate on real photos across the whole session:
+
+```
+contaminated (CIFAKE+SID_Set)   FPR=0.149
+clean (CIFAKE+Tiny-GenImage)    FPR=0.044
+FINAL (Tiny-GenImage only)      FPR=0.019     ~8x reduction
+```
+
+**Every number in this section is clean-image only.** The robustness grid --
+half the competition score -- is not yet measured, and the open hypothesis from
+section 2c (that part of the signal is "generated at 256x256", which would
+degrade under resize 0.5x/0.25x) is still unresolved. Treat val/heldout AUC
+~0.999 as in-distribution and near-meaningless on its own; demo-val 0.9949
+against a ~0.65 shortcut floor is the number with content.
+
+---
+
 ## 3. What was built
 
 ### Wave 1
@@ -332,16 +475,37 @@ the **same dataset family the paper trains on**.
       `rglob` so no code change was needed. `demo_val.csv` now has 13,843 rows.
       `main.py embed --manifest demo-val` added (EVALUATION ONLY — `train_head`
       hardcodes TRAIN/VAL manifests and cannot see it).
-- [ ] Ingest Tiny-GenImage: downloader, indexer, `generator` column in manifests,
-      generator-aware splits.
-- [ ] Re-run `audit-data` on the new data **before** training anything on it.
-- [ ] Backbone race across all four (see trap 1 below).
-- [ ] Robustness grid + `0.5*AUC_clean + 0.5*AUC_robust` scoring.
+- [x] Ingest Tiny-GenImage — DONE. 28,000 train + 7,000 heldout, `generator`
+      column, generator-aware split flags (`--exclude-source`,
+      `--max-per-source`, `--holdout-generators`). See section 2c.
+- [x] Audit the new data before training on it — DONE, section 2c. Content
+      shortcut absent (all probes at or below chance).
+- [x] Train on clean data — DONE, section 2d. Final model
+      `models/pe-core-l__linear.pt`, demo-val AUC 0.9949, FPR 0.019.
+- [x] Add `data/embeddings/`, `models/`, `data/heldout/` to `.gitignore` — DONE.
+- [ ] **Robustness grid + `0.5*AUC_clean + 0.5*AUC_robust` scoring — the single
+      biggest gap.** Half the competition score is unmeasured. All 15 pipelines
+      already exist in `build_robustness_eval_transforms()`; they need an eval
+      loop and a per-view embedding cache (which must carry a manifest
+      fingerprint — see trap 7). Settles section 2c's open hypothesis about the
+      "generated at 256x256" signal degrading under resize 0.5x/0.25x.
 - [ ] `predict.py --input_dir <dir> --output preds.json` emitting
-      `[{"image_path": ..., "pred": <float 0-1>}, ...]` — required deliverable.
-- [ ] Calibration (temperature + threshold per degradation bucket).
-- [ ] Add `data/embeddings/` and `models/` to `.gitignore` (currently untracked,
-      unignored).
+      `[{"image_path": ..., "pred": <float 0-1>}, ...]` — required deliverable,
+      not started.
+- [ ] Backbone race across all four (see trap 1). Deferred until the robustness
+      grid exists — clean-only AUC cannot separate them (val is already 0.9996,
+      saturated), and the grid is what actually discriminates.
+- [ ] Augmentation ablation: clean-only vs clean + K precomputed degraded views,
+      scored on the grid. See trap 4 — this only became answerable now that the
+      data is clean.
+- [ ] Cross-generator evaluation using `--holdout-generators`. NOTE: val will
+      mix seen and unseen generators, so a single val AUC does not isolate
+      unseen-generator performance. The eval step must filter val to the
+      held-out generators plus reals. Not yet built.
+- [ ] Calibration (temperature + threshold per degradation bucket). Note the
+      case for this is weaker than section 2 implied — see section 2b.
+- [ ] Error analysis note (5.5.5). demo-val FPR 0.019 / TPR 0.948 is the
+      starting material.
 
 ---
 
@@ -367,3 +531,44 @@ the **same dataset family the paper trains on**.
    `make_splits.py` structurally never globs.
 6. **ASCII only in anything passed to `print()`** — Windows console mojibakes
    non-ASCII. Unicode is fine in docstrings and Markdown.
+7. **The embedding cache is keyed by manifest FILENAME, not contents — always
+   confirm it says it matched.** `main.py split` rewrites
+   `data/processed/train.csv` and `val.csv` **in place**: same filename,
+   completely different images. The cache file is
+   `data/embeddings/<backbone>__<manifest stem>.npz`, so a re-split silently
+   collides with the previous run's cache.
+
+   Originally `embed` skipped whenever a file of that name existed, with no
+   check that the images matched. That would have handed back embeddings
+   computed from the *old* (SID_Set-contaminated) data while we believed we
+   were measuring the new clean data — printing "already exists -- skipping",
+   which reads like success. The resulting AUC would have looked entirely
+   plausible, and the conclusion would have been the exact inverse of the truth:
+   "replacing the dirty data made no difference."
+
+   Fixed in `embed.py`: `manifest_fingerprint()` hashes the manifest's
+   `image_path` column in order and stores it in the `.npz`; a mismatch (or a
+   missing fingerprint, i.e. any cache written before this existed) forces a
+   recompute. **Expected healthy output is one of:**
+   ```
+   [embed] ... already exists and matches the manifest -- skipping
+   [embed] ... is STALE (manifest changed) -- recomputing
+   ```
+   If you ever see a skip without the words "matches the manifest", the check
+   has been removed or bypassed — stop and investigate before trusting any
+   number downstream.
+
+   `train_head` also verifies both fingerprints before training and exits with
+   a `STALE EMBEDDINGS` error rather than proceeding -- that is where wrong data
+   would actually be consumed, and `embed`'s check alone does not cover it (a
+   run killed part-way leaves the previous `.npz` in place, which is exactly
+   what happened once on 2026-08-29). Healthy output is:
+   ```
+   [train-head] train embeddings match train.csv (fingerprint OK)
+   [train-head] val embeddings match val.csv (fingerprint OK)
+   ```
+
+   The general lesson, which applies beyond this one file: **a cache keyed on a
+   name rather than on contents produces confident wrong answers instead of
+   visible failures.** Anything else that caches per-manifest (future robustness
+   grids, per-view embedding caches) needs the same fingerprint.
