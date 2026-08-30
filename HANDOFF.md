@@ -1,6 +1,109 @@
-# Handoff — the race is DONE and decided; next is deliverable 5.5.5
+# Handoff
 
-**Written 2026-08-29, updated after the race completed.**
+**Written 2026-08-29. Section A rewritten 2026-08-30 and supersedes everything
+below it where they disagree.**
+
+---
+
+# A. CURRENT STATE (2026-08-30) — read this first
+
+## Ship this
+
+**`models/pe-core-l__linear__photoreal.pt`** at threshold **0.95**. Already the
+default in `predict.py`, `main.py predict` and `demo/server.py`.
+
+```
+uv run main.py train-head-views --backbone pe-core-l --with-chains \
+  --val-sample-rows 2000 --extra-train-manifest sid-real unsplash-real \
+  --balance --out models/pe-core-l__linear__photoreal.pt
+```
+
+| tier | clean AUC | 18-view mean | what it tests |
+|---|---|---|---|
+| `ood` | **0.9961** | 0.9620 | 10 generators absent from training |
+| `wildrf_test` | **0.9935** | 0.9743 | real Reddit/X/Facebook photos |
+| `demo_val` | 0.9990 | 0.9897 | the brief's 5.4 benchmark |
+| `val` | 0.9987 | — | in-distribution |
+
+Weakest view everywhere: `noise_sigma0.1` (0.84-0.86). `chain_heavy` is below
+every transform composing it — composition costs more than any single axis.
+
+## What changed since the race
+
+1. **Real-domain corpora.** +sid_real +unsplash_real took WildRF FPR@0.5 from
+   .330 to .183 at unchanged TPR, and improved ood. Data, not modelling.
+2. **The portrait bug was OUR label bug.** See FINDINGS 2h-CORRECTION. ood's
+   `WhichFaceIsReal` is StyleGAN faces; we had relabelled them real. Corrected,
+   ood clean AUC went 0.9670 -> 0.9961. Every pre-2026-08-30 ood number in this
+   file and in NARRATIVE.md is understated by roughly that margin.
+3. **Threshold 0.95, not 0.5.** Chosen on a held-out WildRF split. FPR 18.8% ->
+   2.8% for TPR 99.5% -> 95.8%. `predict.DECISION_THRESHOLD`.
+4. **Head depth tested and rejected.** MLPs beat linear on val and double
+   real-world FPR at matched recall. FINDINGS 2i. Do not revisit via val.
+
+## THE REMAINING PROBLEM IS DIFFUSION, AND IT IS NOT ABOUT UNSEEN GENERATORS
+
+At threshold 0.95 on `ood`:
+
+| family | TPR@0.95 | verdict |
+|---|---|---|
+| GAN | **0.966** | solved, and mostly on UNSEEN generators. Incidental. |
+| diffusion | **0.859** | the entire remaining gap |
+
+The loss is three generators, and two are already in training:
+
+| generator | seen? | TPR@0.5 | TPR@0.95 |
+|---|---|---|---|
+| DALLE2 | unseen | 0.817 | **0.550** |
+| ADM | **TRAINED** | 0.894 | **0.626** |
+| Midjourney | **TRAINED** | 0.876 | **0.752** |
+| SD14 | unseen | 1.000 | 0.967 |
+| SDXL | unseen | 0.992 | 0.984 |
+
+**SD14 and SDXL are unseen and near-perfect, so unseen-ness is not the driver.**
+Do not spend effort "training on the unseen generators" as a category. Spend it
+on the hard ones.
+
+Two further facts to plan against:
+- Our diffusion training data is entirely **GenImage-era (2022)**. SD3, Flux,
+  DALLE3, MJv6 are absent. A 16-image probe of DALLE-3 scored TPR@0.95 = 0.875
+  (wide error bars, but not catastrophic).
+- **Threshold cost.** 0.5 -> 0.95 bought a 6.7x FPR cut and cost 9 points of
+  diffusion recall (ADM 0.894 -> 0.626). Temperature calibration would partly
+  decouple these and is unimplemented.
+
+## Next actions, in order
+
+1. **`train_ext` arm** — embedding in progress (30,919 rows x 11 views).
+   Expect little: of its 1,941 new AIGC rows, **1,617 are GAN** and only 324 are
+   diffusion (SD14, already 0.967 unseen). Its likely value is the 5,178 extra
+   REALS. Judge on WildRF + ood **at matched TPR**, never at 0.5.
+2. **More ADM + Midjourney** from AIGC-bench positions 8,400+. Free: both are
+   already seen, so no benchmark loses meaning, and they carry 37% and 25% miss
+   rates at the shipping threshold.
+3. **Modern diffusion** (DALLE3 / MJv6 / SD3 — all parquet with embedded images,
+   verified reachable). Hold ONE out as the modern-diffusion eval tier we lack.
+   Re-encode to JPEG q95 like everything else, or the head learns a format
+   shortcut instead of a generator artifact.
+4. **Keep DALLE2 held out.** Weakest generator AND the only honest
+   unseen-diffusion probe. Training on it raises the number and kills the
+   measurement.
+5. **Temperature calibration** — recovers diffusion recall without giving back
+   the FPR win.
+
+## Two data hazards that cost days. Check both before adding any corpus.
+
+- **Verify the pixels, not the name.** A "pexels" mirror shipped Depth Anything
+  outputs; 4,000 depth maps trained as REAL. Run
+  `uv run python scripts/audit_corpora.py` — real photography sits at 0.30-0.36
+  saturation, the depth maps at 0.000. It exits non-zero on an outlier.
+- **Compare at matched TPR.** Those depth maps made FPR@0.5 look BETTER
+  (.183 -> .130) while making the ranking WORSE at every matched operating point.
+  A threshold-0.5 comparison would have shipped them.
+
+---
+
+# B. The race (historical record)
 
 ## THE RACE IS FINISHED AND THE DECISION IS MADE. Do not re-run it.
 
@@ -16,10 +119,16 @@ against a rule fixed before the numbers were seen (switch only on > +0.010):
 Same ordering on the in-scope diffusion-only metric (0.9466 / 0.9140 / 0.9143
 clean), on worst-case, and on val. Full write-up: `NARRATIVE.md` Run 7.
 
-**The shipping model is `models/pe-core-l__linear__augchain.pt`**, which is
-already `predict.py`'s default. `models/*__linear__race.pt` are the race
-artifacts; `pe-core-l__linear__race.pt` is equivalent to the shipping head
-(same config, same seed).
+~~**The shipping model is `models/pe-core-l__linear__augchain.pt`**~~ —
+**superseded.** See section A: the shipping head is
+`models/pe-core-l__linear__photoreal.pt`. `models/*__linear__race.pt` remain the
+race artifacts.
+
+**The 0.9366 above is not comparable to any current number.** It predates the
+`WhichFaceIsReal` label fix, which counted 250 correctly-detected StyleGAN
+faces as false positives. The backbone ORDERING still stands — all three
+challengers were scored under the same wrong labels — but the absolute values
+are understated. Do not compare them against section A's figures.
 
 **Start at section 0 below** -- it carries the newest findings (the data lever,
 the disjoint training slice, and why metaclip2-giant is blocked). Sections 1-2
@@ -29,7 +138,7 @@ required piece.
 
 ---
 
-## 0. LATEST (2026-08-30) — the data lever is the live one; read this first
+## 0. Earlier same-day notes — SUPERSEDED BY SECTION A, kept for the trail
 
 Two jobs may still be running when you pick this up. Check before assuming:
 
