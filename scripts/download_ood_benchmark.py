@@ -102,25 +102,59 @@ def reindex_from_disk() -> Path:
     suggested, so its quota never filled and the run kept scanning long after
     every in-scope generator was complete.
 
-    Recovery is exact rather than approximate: the directory name IS the
-    generator, and the label follows from the generator (only Real and
-    WhichFaceIsReal are real sources), so nothing is inferred from the pixels.
+    Recovery recovers the GENERATOR exactly -- the directory name is the
+    generator. It does NOT recover the label, and must never invent one.
+
+    It used to: `label = REAL if generator in real_gens else AIGC`. That is only
+    sound if a generator class is single-label upstream, and WhichFaceIsReal is
+    not -- whichfaceisreal.com pairs an FFHQ photo with a StyleGAN fake, and the
+    HF port ships the fakes under a class name that reads as real. We had that
+    class mapped to family "real", so a rebuild silently rewrote 250 StyleGAN
+    images from label=1 to label=0. Nothing downstream could notice: the images
+    were where they belonged, the fingerprint hashes image_path only, and the
+    resulting "100% false positive rate on portraits" looked like a model
+    failure worth chasing. It cost days and produced a whole wrong theory about
+    portraits being absent from the training pool.
+
+    So the label now comes from the existing index if one is present, and
+    otherwise this refuses to guess. A wrong label is worse than no index.
     """
     root = OOD_DIR / "images"
     if not root.exists():
         raise SystemExit(f"No images under {root}. Run `uv run main.py download-ood` first.")
 
-    real_gens = {g for g, fam in GENERATOR_FAMILY.items() if fam == "real"}
+    # Labels come only from a previously written index, keyed by image_path.
+    known: dict[str, int] = {}
+    for prior in sorted(OOD_DIR.glob("*_index.csv")):
+        with open(prior, newline="", encoding="utf-8") as fh:
+            for row in csv.DictReader(fh):
+                known[row["image_path"]] = int(row["label"])
+    if known:
+        print(f"[ood] recovered {len(known):,} labels from existing index file(s)")
+
     records: list[tuple[str, int, str]] = []
+    unlabelled: list[str] = []
     for gen_dir in sorted(root.iterdir()):
         if not gen_dir.is_dir():
             continue
         generator = gen_dir.name
         if generator not in GENERATOR_FAMILY:
             print(f"[ood] WARNING: unknown generator dir '{generator}' -- included, family unknown")
-        label = LABEL_REAL if generator in real_gens else LABEL_AIGC
         for img in sorted(gen_dir.glob("*.jpg")):
-            records.append((str(img.resolve()), label, generator))
+            key = str(img.resolve())
+            if key not in known:
+                unlabelled.append(key)
+                continue
+            records.append((key, known[key], generator))
+
+    if unlabelled:
+        raise SystemExit(
+            f"[ood] {len(unlabelled):,} image(s) on disk have no label in any index file, e.g.\n"
+            f"      {unlabelled[0]}\n"
+            f"      Labels cannot be derived from the directory name -- a generator class can\n"
+            f"      hold BOTH real and fake images upstream (WhichFaceIsReal does). Re-run\n"
+            f"      `main.py download-ood` so labels come from the dataset's own label field."
+        )
 
     if not records:
         raise SystemExit(f"No .jpg files found under {root}.")

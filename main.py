@@ -122,7 +122,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from aigc_detect.config import (  # noqa: E402
+    PEXELS_REAL_MANIFEST,
+    PHOTO_REAL_MANIFEST,
+    SID_REAL_MANIFEST,
     TRAIN_EXT_MANIFEST,
+    UNSPLASH_REAL_MANIFEST,
+    WILDRF_REAL_MANIFEST,
+    WILDRF_TEST_MANIFEST,
     OOD_MANIFEST,
     ROOT_DIR,
     DEMO_VAL_DIR,
@@ -307,6 +313,12 @@ def _resolve_manifest(name: str):
     manifests = {
         "train": TRAIN_MANIFEST,
         "train-ext": TRAIN_EXT_MANIFEST,
+        "sid-real": SID_REAL_MANIFEST,
+        "photo-real": PHOTO_REAL_MANIFEST,
+        "unsplash-real": UNSPLASH_REAL_MANIFEST,
+        "pexels-real": PEXELS_REAL_MANIFEST,
+        "wildrf-real": WILDRF_REAL_MANIFEST,
+        "wildrf-test": WILDRF_TEST_MANIFEST,
         "val": VAL_MANIFEST,
         "heldout": HELDOUT_MANIFEST,
         "demo-val": DEMO_VAL_MANIFEST,
@@ -316,7 +328,11 @@ def _resolve_manifest(name: str):
     if not manifest.exists():
         hint = {"demo-val": "build-demo-val", "heldout": "build-heldout",
                 "ood": "download-ood` then `main.py build-ood",
-                "train-ext": "python scripts/make_train_ext.py"}.get(name, "split")
+                "train-ext": "python scripts/make_train_ext.py",
+                "sid-real": "python scripts/make_sid_real.py",
+                "photo-real": "python scripts/download_real_domains.py --merge",
+                "wildrf-real": "python scripts/make_wildrf.py",
+                "wildrf-test": "python scripts/make_wildrf.py"}.get(name, "split")
         print(f"No {name} manifest at {manifest}. Run `main.py {hint}` first.")
         sys.exit(1)
     return manifest
@@ -363,6 +379,14 @@ def cmd_train_head_views(args):
     train_manifest = TRAIN_EXT_MANIFEST if args.train_manifest == 'train-ext' else TRAIN_MANIFEST
     train_stem = cache_stem(train_manifest, sample_rows=args.train_sample_rows)
     val_stem = cache_stem(VAL_MANIFEST, sample_rows=args.val_sample_rows)
+
+    # Extra manifests are concatenated onto the training rows, each keeping its
+    # own cache stem and its own fingerprint check. The point is that adding
+    # images does NOT invalidate the stem already computed for the base pool.
+    extra = []
+    for name in args.extra_train_manifest or ():
+        m = _resolve_manifest(name)
+        extra.append((cache_stem(m), m))
     views = tuple(args.train_views) if args.train_views else TRAIN_VIEWS_DEFAULT
     if args.with_chains:
         views = TRAIN_VIEWS_WITH_CHAINS
@@ -385,6 +409,8 @@ def cmd_train_head_views(args):
         val_manifest=VAL_MANIFEST,
         val_sample_rows=args.val_sample_rows,
         seed=args.seed,
+        extra_train=extra,
+        balance_classes=args.balance,
     )
 
 
@@ -459,7 +485,7 @@ def cmd_error_analysis(args):
 def cmd_predict(args):
     from aigc_detect.predict import run_inference
 
-    head_path = Path(args.head) if args.head else ROOT_DIR / "models" / "pe-core-l__linear__augchain.pt"
+    head_path = Path(args.head) if args.head else ROOT_DIR / "models" / "pe-core-l__linear__photoreal.pt"
     if not head_path.exists():
         print(f"No head checkpoint at {head_path}. Pass --head <path> or train one first.")
         sys.exit(1)
@@ -565,7 +591,7 @@ def build_parser() -> argparse.ArgumentParser:
         "embed", help='Precompute + cache pooled embeddings for a manifest under data/embeddings/.'
     )
     p_embed.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
-    p_embed.add_argument("--manifest", required=True, choices=["train", "train-ext", "val", "heldout", "demo-val", "ood"])
+    p_embed.add_argument("--manifest", required=True, choices=["train", "train-ext", "sid-real", "photo-real", "unsplash-real", "pexels-real", "wildrf-real", "val", "heldout", "demo-val", "ood", "wildrf-test"])
     p_embed.add_argument("--batch-size", type=int, default=64)
     p_embed.add_argument("--num-workers", type=int, default=4)
     p_embed.add_argument("--force", action="store_true", help="Recompute even if the cached .npz already exists.")
@@ -579,7 +605,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Precompute cached embeddings for every robustness view (5.2 table) of a manifest.",
     )
     p_embed_views.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
-    p_embed_views.add_argument("--manifest", required=True, choices=["train", "train-ext", "val", "heldout", "demo-val", "ood"])
+    p_embed_views.add_argument("--manifest", required=True, choices=["train", "train-ext", "sid-real", "photo-real", "unsplash-real", "pexels-real", "wildrf-real", "val", "heldout", "demo-val", "ood", "wildrf-test"])
     p_embed_views.add_argument(
         "--views", nargs="+", default=None, metavar="VIEW",
         help="Only compute these views (default: all 18). E.g. --views clean blur_sigma2.0 chain_heavy",
@@ -622,6 +648,16 @@ def build_parser() -> argparse.ArgumentParser:
                             "including all chains, stay held out and are only evaluated).")
     p_thv.add_argument("--train-manifest", default="train", choices=["train", "train-ext"],
                        help="Which training manifest to read cached views for (default: train).")
+    p_thv.add_argument("--extra-train-manifest", nargs="+", default=None, metavar="NAME",
+                       choices=["train-ext", "sid-real", "photo-real", "unsplash-real", "pexels-real", "wildrf-real"],
+                       help="Additional manifest(s) whose cached views are CONCATENATED onto the "
+                            "training rows. Each keeps its own stem and fingerprint check, so the "
+                            "base pool's cache is reused rather than recomputed. Embed them first "
+                            "with the same --train-views/--with-chains selection.")
+    p_thv.add_argument("--balance", action="store_true",
+                       help="Weight the loss so the two classes contribute equally (pos_weight = "
+                            "n_real/n_aigc). Use when an extra manifest skews the label prior -- "
+                            "otherwise a drop in FPR cannot be told apart from a shifted boundary.")
     p_thv.add_argument("--with-chains", action="store_true",
                        help="Also train on the 4 trainchain_* views (composition, built only from "
                             "severities already in the default set). The 3 SCORED chains stay held out.")
@@ -641,7 +677,7 @@ def build_parser() -> argparse.ArgumentParser:
         "eval-grid", help="Score a trained head across every cached robustness view (5.5.4)."
     )
     p_eval_grid.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
-    p_eval_grid.add_argument("--manifest", required=True, choices=["train", "train-ext", "val", "heldout", "demo-val", "ood"])
+    p_eval_grid.add_argument("--manifest", required=True, choices=["train", "train-ext", "sid-real", "photo-real", "unsplash-real", "pexels-real", "wildrf-real", "val", "heldout", "demo-val", "ood", "wildrf-test"])
     p_eval_grid.add_argument("--head", default=None, help="Head checkpoint (default: models/<backbone>__<kind>.pt).")
     p_eval_grid.add_argument("--head-kind", default="linear", choices=["linear", "mlp"],
                              help="Only used to locate the default checkpoint path.")
@@ -663,7 +699,7 @@ def build_parser() -> argparse.ArgumentParser:
              "Needs embed-views cached for the same (backbone, manifest, sample-rows) first.",
     )
     p_err.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
-    p_err.add_argument("--manifest", required=True, choices=["train", "train-ext", "val", "heldout", "demo-val", "ood"])
+    p_err.add_argument("--manifest", required=True, choices=["train", "train-ext", "sid-real", "photo-real", "unsplash-real", "pexels-real", "wildrf-real", "val", "heldout", "demo-val", "ood", "wildrf-test"])
     p_err.add_argument("--head", default=None, help="Head checkpoint (default: models/<backbone>__<kind>.pt).")
     p_err.add_argument("--head-kind", default="linear", choices=["linear", "mlp"],
                         help="Only used to locate the default checkpoint path.")
@@ -697,7 +733,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_predict.add_argument("--output", required=True, help="Path to write the JSON predictions array to.")
     p_predict.add_argument(
         "--head", default=None,
-        help="Head checkpoint path (default: models/pe-core-l__linear__augchain.pt).",
+        help="Head checkpoint path (default: models/pe-core-l__linear__photoreal.pt).",
     )
     p_predict.add_argument("--batch-size", type=int, default=32)
     p_predict.add_argument("--num-workers", type=int, default=4)

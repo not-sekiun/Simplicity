@@ -21,6 +21,17 @@ dependencies = [
     "transformers>=5.16.1",
 ]
 
+# Not part of the graded deliverables -- backs the Chrome-extension live demo
+# only (demo/server.py). Kept out of the base dependency set on purpose so
+# `uv sync` for the actual submission stays lean. Install with
+# `uv sync --extra demo`.
+[project.optional-dependencies]
+demo = [
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
+    "requests>=2.32",
+]
+
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu130" }]
 torchvision = [{ index = "pytorch-cu130" }]

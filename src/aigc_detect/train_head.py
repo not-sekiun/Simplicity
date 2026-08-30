@@ -10,6 +10,7 @@ only -- the val set never contributes to the scaler, to avoid leakage.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -18,7 +19,15 @@ import torch.nn as nn
 from sklearn.metrics import balanced_accuracy_score, roc_auc_score
 from torch.utils.data import DataLoader, TensorDataset
 
-from aigc_detect.config import EMBEDDINGS_DIR, RANDOM_SEED, ROOT_DIR, TRAIN_MANIFEST, VAL_MANIFEST
+from aigc_detect.config import (
+    EMBEDDINGS_DIR,
+    LABEL_AIGC,
+    LABEL_REAL,
+    RANDOM_SEED,
+    ROOT_DIR,
+    TRAIN_MANIFEST,
+    VAL_MANIFEST,
+)
 from aigc_detect.heads import build_head
 from aigc_detect.transforms import eval_view_names, train_chain_view_names
 
@@ -122,6 +131,8 @@ def train_head_on_views(
     val_manifest: str | Path | None = None,
     val_sample_rows: int | None = None,
     seed: int = RANDOM_SEED,
+    extra_train: Sequence[tuple[str, str | Path | None]] = (),
+    balance_classes: bool = False,
 ):
     """Train a head on cached CLEAN + DEGRADED embeddings of the same images.
 
@@ -148,6 +159,22 @@ def train_head_on_views(
     manifest_fingerprint is still enforced, so caches from different row
     selections cannot be silently mixed. Train and val are never
     cross-compared -- they are different manifests and legitimately differ.
+
+    ``extra_train`` is a sequence of ``(stem, manifest)`` pairs whose cached
+    views are concatenated onto the training rows. Each pair is verified against
+    its OWN manifest, and the one-fingerprint-per-stem rule is applied per stem,
+    so this widens the training pool without weakening any check -- the whole
+    point being that the base pool's cache stays valid instead of being
+    recomputed for a union manifest with a new fingerprint. The standardizer
+    still comes from the BASE stem's clean view alone: it is a preprocessing
+    constant that ships in the checkpoint and gets applied to arbitrary images at
+    inference, so holding it fixed keeps the added rows the single variable.
+
+    ``balance_classes`` sets BCE's ``pos_weight`` to n_real/n_aigc. An extra
+    manifest that is all one class shifts the label prior, and a prior shift
+    lowers FPR by moving the decision boundary rather than by teaching anything
+    -- which would be indistinguishable from the domain-coverage effect these
+    runs are meant to measure (FINDINGS 2h).
     """
     from aigc_detect.embed import fingerprint_paths
     from aigc_detect.embed_views import load_view_cache, select_rows
@@ -181,6 +208,27 @@ def train_head_on_views(
             f"mixed under stem '{train_stem}'. Re-run embed-views for the train manifest with "
             f"matching flags."
         )
+
+    extra_arrays: list[dict[str, tuple]] = []
+    for extra_stem, extra_manifest in extra_train:
+        expected_fp = _expected_fp(extra_manifest, None)
+        arrays, fps = {}, set()
+        for view in train_views:
+            emb, labels, meta = load_view_cache(
+                backbone_key, extra_stem, view, all_specs[view], expected_manifest_fp=expected_fp
+            )
+            arrays[view] = (emb, labels)
+            fps.add(meta["manifest_fingerprint"])
+        if len(fps) > 1:
+            raise SystemExit(
+                f"[train-views] STALE: extra stem '{extra_stem}' has views from different row "
+                f"selections ({sorted(fps)}). Re-run embed-views for that manifest."
+            )
+        extra_arrays.append(arrays)
+        n_extra = len(arrays["clean"][0])
+        n_real = int((arrays["clean"][1] == LABEL_REAL).sum())
+        print(f"[train-views] extra stem={extra_stem} images={n_extra:,} "
+              f"({n_real:,} real / {n_extra - n_real:,} aigc) fingerprint OK")
 
     # Validate on the SCORED views only, so the per-epoch AUC_robust printed
     # here is the same quantity eval-grid reports. A trainchain_* cache landing
@@ -220,13 +268,19 @@ def train_head_on_views(
     std = clean_emb.std(axis=0)
     std[std == 0] = 1.0
 
-    x = np.concatenate([(train_arrays[v][0] - mean) / std for v in train_views])
-    y = np.concatenate([train_arrays[v][1] for v in train_views]).astype(np.float32)
+    all_sets = [train_arrays, *extra_arrays]
+    x = np.concatenate([(arrays[v][0] - mean) / std for v in train_views for arrays in all_sets])
+    y = np.concatenate([arrays[v][1] for v in train_views for arrays in all_sets]).astype(np.float32)
 
     held_out = sorted(set(val_arrays) - set(train_views))
     print(f"[train-views] backbone={backbone_key} head={head_kind} device={device}")
-    print(f"[train-views] train stem={train_stem} images={len(clean_emb)} views={len(train_views)} "
+    n_images = sum(len(arrays["clean"][0]) for arrays in all_sets)
+    print(f"[train-views] train stem={train_stem} images={n_images} views={len(train_views)} "
           f"-> {len(x):,} training rows")
+    n_pos = int((y == float(LABEL_AIGC)).sum())
+    n_neg = len(y) - n_pos
+    print(f"[train-views] class mix: {n_neg:,} real / {n_pos:,} aigc "
+          f"({n_neg / len(y):.1%} real)")
     print(f"[train-views] TRAINED views:  {', '.join(train_views)}")
     print(f"[train-views] HELD-OUT views: {', '.join(held_out)}")
     print(f"[train-views] validating on {val_stem} ({len(val_arrays)} cached views)")
@@ -254,7 +308,12 @@ def train_head_on_views(
     )
     head = build_head(head_kind, x.shape[1]).to(device)
     optimizer = torch.optim.AdamW(head.parameters(), lr=lr, weight_decay=weight_decay)
-    criterion = nn.BCEWithLogitsLoss()
+    if balance_classes and n_pos:
+        pos_weight = torch.tensor(n_neg / n_pos, device=device)
+        print(f"[train-views] --balance: pos_weight={pos_weight.item():.4f}")
+        criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    else:
+        criterion = nn.BCEWithLogitsLoss()
 
     for epoch in range(1, epochs + 1):
         head.train()
@@ -288,6 +347,8 @@ def train_head_on_views(
             "scaler_mean": mean,
             "scaler_std": std,
             "train_stem": train_stem,
+            "extra_train_stems": [s for s, _ in extra_train],
+            "balance_classes": bool(balance_classes),
             "train_views": list(train_views),
             "held_out_views": held_out,
             "epochs": epochs,

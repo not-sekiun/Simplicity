@@ -85,9 +85,13 @@ Two things the breakdown shows:
 - **Clean improved, robustness did not** (+0.0092 clean, -0.0009 robust, -0.0049
   worst). More of the SAME distribution sharpens clean discrimination and buys
   no robustness.
-- **The portrait bug is completely unmoved.** `WhichFaceIsReal` FPR was 1.000
-  before and is 1.000 after. 4x more ImageNet-derived reals does nothing for a
-  domain that is not ImageNet. Strongest confirmation yet of FINDINGS 2h.
+- ~~**The portrait bug is completely unmoved.** `WhichFaceIsReal` FPR was 1.000
+  before and is 1.000 after.~~ **RETRACTED** -- those 250 images are StyleGAN
+  fakes we had relabelled as real, so FPR 1.000 was the model being correct.
+  See FINDINGS 2h-CORRECTION. Corrected OOD for the shipping head
+  (`photoreal`, re-embedded and re-scored with `eval-grid`):
+  clean AUC **0.9961**, 18-view mean **0.9620**, clean FPR **0.0220**,
+  clean TPR **0.9660**. Same tier, same head, `augchain`: 0.9940 / 0.9597.
 
 2 epochs is fine; a 1-epoch run scored 0.9404 vs 0.9407, so the epoch-2 dip in
 the val log does not carry to ood.
@@ -239,18 +243,36 @@ judged that acceptable, but confirm before shipping it if it ever wins.
 |---|---|---|---|
 | 1 | Full-pool retrain | done | **+0.0041** (predicted +0.015-0.025; see above) |
 | 2 | Deliverable 5.5.5 error analysis | done | `main.py error-analysis`, verified |
-| 3 | **Real-domain corpus (FFHQ / photography)** | not started | **only thing that fixes FPR 1.000. Highest value.** |
+| 3 | **Real-domain corpus (photography)** | DONE | sid_real + 4,000 Unsplash -> `photoreal.pt`, now the shipping head. WildRF FPR@0.5 **.330 -> .183** at TPR .993, and OOD improved too. |
 | 4 | Train on `train_ext` (6 new generators) | manifest built, embed pending | unknown; judge on held-out DALLE2 + SDXL |
 | 5 | metaclip2-giant | micro-batching + ~5h | prior says it loses by ~0.02 |
 
-**On (3):** FFHQ is the field-standard real-face source, but **WhichFaceIsReal's
-real half IS FFHQ** -- training on it puts the canary's images into training and
-the detector goes green while the bug remains. Train on a different face source
-(CelebA-HQ), or hold out an explicit FFHQ row range. Unsplash Lite (25k
-professional photos, 2048-4280px) is the closest available proxy for the
-r/itookapicture domain, but ships URLs only, not images. Low-resolution face
-sets (e.g. ffhq128) are actively harmful here: upscaled to 336 they are blurry,
-and we measured that smoother -> more AI-looking.
+**On (3), as actually done:** the face-source problem was moot -- there was no
+portrait bug (FINDINGS 2h-CORRECTION). What did work was ordinary domain
+coverage of the REAL class: `sid-real` (SID_Set's OpenImages reals) plus 4,000
+Unsplash photographs, concatenated via `--extra-train-manifest` so each keeps its
+own cache stem. Shipping head:
+
+```
+uv run main.py train-head-views --backbone pe-core-l --with-chains \
+  --val-sample-rows 2000 --extra-train-manifest sid-real unsplash-real \
+  --balance --out models/pe-core-l__linear__photoreal.pt
+```
+
+**Two data hazards this cost us; check both before adding any real corpus.**
+
+1. *Verify the pixels, not the name.* A "pexels" mirror
+   (`cj-mills/pexels-110k-768p-min-jpg-depth-anything-large-hf`) ships Depth
+   Anything OUTPUTS -- single-channel depth maps named after photos it does not
+   contain. `img.convert("RGB")` widens them to three identical channels
+   silently, and they cleared the 384px floor at 768p. 4,000 trained as REAL.
+   `scripts/audit_corpora.py` now fingerprints every corpus (saturation,
+   bytes/px); real photography sits at 0.30-0.36 saturation, the depth maps at
+   0.000. Run it before training on anything new.
+2. *Compare at matched TPR, not at threshold 0.5.* Those depth maps made
+   FPR@0.5 look BETTER (.183 -> .130) while making the ranking worse at every
+   matched operating point (.051 -> .070 at TPR=.98). A threshold-0.5 comparison
+   would have shipped them.
 
 
 Read order: this file, then `NARRATIVE.md`'s "Comparability epochs" table

@@ -18,6 +18,29 @@ TRAIN_MANIFEST = PROCESSED_DIR / "train.csv"
 TRAIN_EXT_MANIFEST = PROCESSED_DIR / "train_ext.csv"
 VAL_MANIFEST = PROCESSED_DIR / "val.csv"
 
+# REAL-only corpora, concatenated onto training via --extra-train-manifest.
+# Each keeps its own manifest, and therefore its own cache stem and fingerprint,
+# so adding one never invalidates the base pool's cached embeddings.
+#
+# They exist because the training pool's real half is ImageNet and nothing else,
+# and any real image from an absent domain gets mapped confidently into AIGC
+# territory. Adding sid_real + unsplash_real took WildRF FPR@0.5 from .330 to
+# .183 with no cost on ood.
+SID_REAL_MANIFEST = PROCESSED_DIR / "sid_real.csv"          # SID_Set's real half (OpenImages)
+UNSPLASH_REAL_MANIFEST = PROCESSED_DIR / "unsplash_real.csv"  # curated photography
+PEXELS_REAL_MANIFEST = PROCESSED_DIR / "pexels_real.csv"      # curated photography
+PHOTO_REAL_MANIFEST = PROCESSED_DIR / "photo_real.csv"        # union of the two above
+
+# WildRF (arXiv:2406.09398): real + AI images scraped from Reddit, X and
+# Facebook, carrying genuine platform re-encoding. Split in two on purpose --
+# the reals are a TRAINING source, the test tier is EVAL ONLY, and they come
+# from the same scrape, so a low FPR here after training on wildrf_real is an
+# in-domain reading. The arm trained without it is the honest one.
+REAL_EXT_DIR = DATA_DIR / "real_ext"
+WILDRF_REAL_MANIFEST = PROCESSED_DIR / "wildrf_real.csv"
+WILDRF_DIR = DATA_DIR / "wildrf"
+WILDRF_TEST_MANIFEST = WILDRF_DIR / "wildrf_test.csv"
+
 # Three-tier data separation:
 #   raw/      = training pool (scripts/make_splits.py globs ONLY this dir)
 #   heldout/  = untouched IN-DISTRIBUTION test set, NEVER trained on and NEVER
@@ -90,9 +113,34 @@ GENERATOR_FAMILY = {
     "StarGAN": "gan",
     "StyleGAN": "gan",
     "StyleGAN2": "gan",
-    # Real-image sources.
-    "Real": "real",
-    "WhichFaceIsReal": "real",
+    # NOT a real source, despite the name and despite the upstream dataset card
+    # calling it "Real human face sourced from the WhichFaceIsReal dataset".
+    # whichfaceisreal.com shows an FFHQ photo BESIDE a StyleGAN fake; this HF
+    # port ships only the fake half. Upstream's own label column agrees --
+    # every sampled row is label=1 with names ['real','fake'] -- and the pixels
+    # agree too (incoherent backgrounds, melted hair, blob artefacts). The card
+    # prose is the only signal saying "real", and it loses 2-to-1.
+    #
+    # We had this as "real", which let build_ood's folder-name label inference
+    # rewrite 250 StyleGAN faces to label=0. That single mapping produced the
+    # entire "100% portrait FPR" finding: the model scored them >0.997 because
+    # they ARE fake. Correcting it moved ood clean AUC 0.9670 -> 0.9971.
+    "WhichFaceIsReal": "gan",
+    # Real-image sources. Kept as distinct entries rather than one "Real" label
+    # because pooling them is exactly how a 100% failure on one real
+    # subpopulation stayed invisible behind a healthy aggregate (FINDINGS 2h).
+    "Real": "real",                        # ImageNet, via Tiny-GenImage/GenImage
+    "Real_OpenImages": "real",             # SID_Set's real half
+    "Real_Unsplash": "real",               # curated photography
+    "Real_Pexels": "real",                 # curated photography
+    "Real_WildRF_train": "real",           # WildRF social-media reals (training)
+    "Real_WildRF_reddit": "real",          # WildRF eval tier, per platform
+    "Real_WildRF_twitter": "real",
+    "Real_WildRF_facebook": "real",
+    # WildRF's AI half: real-world social-media fakes, unknown provenance.
+    "WildRF_reddit": "social",
+    "WildRF_twitter": "social",
+    "WildRF_facebook": "social",
 }
 
 # Generators present in data/raw/ (the training pool).

@@ -709,7 +709,16 @@ better race entrant than our current `huge`.
 
 ---
 
-## 2h. PRODUCTION FAILURE: unseen REAL domains are confidently called AI (2026-08-30)
+## 2h. Unseen REAL domains are called AI (2026-08-30)
+## >>> PARTIALLY RETRACTED 2026-08-30 -- read 2h-CORRECTION first <<<
+
+> **The headline of this section was a label bug in our own pipeline, not a model
+> failure.** The "100% FPR on human portraits" rows below are 250 StyleGAN faces
+> that we relabelled as real. The live r/itookapicture observation that prompted
+> the investigation was genuine and is reproduced properly in 2h-CORRECTION; the
+> portrait mechanism, the "threshold cannot fix it" analysis, and every action
+> item derived from them are withdrawn. Section kept intact below because the
+> reasoning trail is why the bug took so long to find.
 
 Found from a live Chrome extension running the shipping head over r/itookapicture,
 where many real photographs scored > 0.50. That is not a threshold problem and it
@@ -778,6 +787,82 @@ generator.
    band; a confident-wrong label is worse than an abstention.
 3. `data/train_ext/` helps only slightly here -- it adds AIGC-bench "Real",
    which is still ImageNet-like. It does not close the portrait gap.
+
+---
+
+## 2h-CORRECTION. The portrait failure was our label bug (2026-08-30)
+
+`WhichFaceIsReal` in `data/ood/` is **not** a real-image source. whichfaceisreal.com
+shows an FFHQ photograph beside a StyleGAN fake; the HF port ships only the fakes
+under a class name that reads as real. Three independent signals agree:
+
+- upstream's own `label` column is `1` (`label names: ['real','fake']`) for every
+  row sampled -- 117/117;
+- the pixels show GAN artefacts on inspection (incoherent backgrounds, melted
+  hair, blob artefacts where jewellery should be);
+- the model scored all 250 above 0.997, which is what a working detector does.
+
+Only the upstream dataset card says "real", and it loses 2-to-1.
+
+**How the wrong label got in.** `config.GENERATOR_FAMILY` mapped
+`WhichFaceIsReal -> "real"`. The OOD index-rebuild step (`reindex_from_disk`,
+used to recover after an interrupted download) derived each label from its
+directory name via that map, rewriting 250 rows from `label=1` to `label=0`.
+Nothing downstream could catch it: the images sat in the right folder, and
+`manifest_fingerprint` hashes `image_path` only, so no cache went stale.
+
+**What it cost.** 250 correctly-detected fakes were counted as false positives,
+which manufactured the "100% portrait FPR", which motivated a portrait-coverage
+theory, a search for real-face corpora, and a face-crop mining plan. All of that
+is withdrawn. The "portrait direction" used in that analysis was computed as
+`mean(WhichFaceIsReal) - mean(ood Real)` -- i.e. a **StyleGAN-face direction**.
+That is why real portraits never reached it (best available: 4.87 against a
+"region" starting at 10.37) and why tighter cropping moved nothing (4.84 -> 5.09
+from full frame to centre-35%): the measurement was distance to StyleGAN faces.
+
+### Corrected OOD numbers
+
+Measured with `eval-grid` after re-embedding `ood-s4000` (the stratified sample
+keys on label, so correcting 250 labels changes which rows it selects; the fresh
+sample is 2,000/2,000 and contains 124 WhichFaceIsReal rows, all `label=1`):
+
+| head | | mean AUC (18 views) | clean AUC | clean FPR | clean TPR |
+|---|---|---|---|---|---|
+| `augchain` | as reported | 0.9153 | 0.9532 | — | — |
+| `augchain` | corrected | 0.9597 | 0.9940 | 0.0205 | 0.9490 |
+| `photoreal` | as reported | 0.9265 | 0.9670 | — | — |
+| **`photoreal`** | **corrected** | **0.9620** | **0.9961** | **0.0220** | **0.9660** |
+
+Worst single view for the shipping head is `noise_sigma0.1` at AUC 0.8616.
+
+### Fix
+
+`WhichFaceIsReal -> "gan"` in `GENERATOR_FAMILY`; the 250 index rows restored to
+`label=1`; `ood.csv` rebuilt to `{real: 4000, aigc: 4200}`; the 54 cached
+`*__ood-s4000__*.npz` label arrays patched in place (safe -- the fingerprint
+covers `image_path` only). `reindex_from_disk` no longer derives labels at all:
+it recovers them from the existing index and **hard-fails** on any image it
+cannot account for, because a generator class can be multi-label upstream.
+
+### What survives from 2h
+
+- **The live observation was real.** Enthusiast photography does false-positive.
+  Measured properly on WildRF (real Reddit/X/Facebook photographs, a tier with
+  no label ambiguity), the then-shipping head flagged **33%** of real social-media
+  photographs at threshold 0.5.
+- **Expanding the REAL corpus by domain works.** Adding SID_Set reals and 4,000
+  Unsplash photographs took WildRF FPR@0.5 from **.330 to .183** at unchanged TPR
+  (.995 -> .993), and improved OOD rather than costing it.
+- **Report FPR per real source.** Still right, with a caveat this episode earned:
+  a per-source breakdown makes a mislabelled source look exactly like a model
+  failure. Inspect the images of any source that reports an extreme number
+  BEFORE theorising about it. Four images would have saved days.
+
+### Withdrawn
+
+The smoothness/saturation correlations among "true reals" (rho=-0.215 / +0.130)
+were computed over an ood real pool that included the 250 mislabelled StyleGAN
+faces. They have **not** been recomputed and should not be cited until they are.
 
 ---
 
