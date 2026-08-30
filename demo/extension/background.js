@@ -10,9 +10,10 @@
 // would otherwise block it.
 //
 // This file is the ONLY place that knows the server's URL. content.js only
-// ever sends {type: "SCORE_BATCH", urls} / {type: "HEALTH"} and receives
-// {url, pred} / {url, error} back -- it has no idea a local HTTP server is
-// even involved, let alone which port it's on.
+// ever sends {type: "SCORE_BATCH", urls} / {type: "SCORE_FRAME", frame} /
+// {type: "HEALTH"} and receives {url, pred}/{url, error} or {pred}/{error}
+// back -- it has no idea a local HTTP server is even involved, let alone
+// which port it's on.
 
 const DEFAULT_SERVER = "http://127.0.0.1:8765";
 
@@ -34,6 +35,25 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         if (!res.ok) throw new Error(`server responded ${res.status}`);
         const data = await res.json();
         sendResponse({ ok: true, results: data.results });
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err) });
+      }
+    })();
+    return true; // keep the message channel open for the async sendResponse
+  }
+
+  if (msg.type === "SCORE_FRAME") {
+    (async () => {
+      try {
+        const base = await getServerBase();
+        const res = await fetch(`${base}/score_frame`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ frame: msg.frame }),
+        });
+        if (!res.ok) throw new Error(`server responded ${res.status}`);
+        const data = await res.json();
+        sendResponse({ ok: true, pred: data.pred, error: data.error });
       } catch (err) {
         sendResponse({ ok: false, error: String(err) });
       }

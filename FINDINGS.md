@@ -900,6 +900,69 @@ on WildRF and the unseen-generator tier, at matched TPR. `mlp2` is kept in
 
 ---
 
+## 2j. train_ext: generator diversity helped the family we had already solved (2026-08-30)
+
+`train_ext` = `train` + 5,178 extra REALS + 1,941 new AIGC rows across 6
+generators absent from our pool. Trained with the identical recipe and the same
+`--extra-train-manifest sid-real unsplash-real`, so the base pool is the only
+variable.
+
+**Predicted before running it, from the composition:** of those 1,941 new AIGC
+rows, **1,617 are GAN** and only 324 are diffusion (SD14, already at 0.967
+*unseen*). So its generator diversity points at the family already solved, and
+its likely value is the extra reals. That is exactly what happened.
+
+| tier | metric | photoreal | trainext |
+|---|---|---|---|
+| WildRF | clean AUC | 0.9935 | **0.9945** |
+| WildRF | **FPR @ TPR .98** | .0512 | **.0344** |
+| ood | clean AUC | 0.9961 | **0.9978** |
+| ood | **FPR @ TPR .98** | .0420 | **.0240** |
+| demo_val | clean AUC | 0.9990 | **0.9995** |
+
+Better at every matched operating point, and on worst-view too (WildRF
+`noise_sigma0.1` 0.8373 -> 0.8495). But the family split shows where it came
+from:
+
+| head | diffusion TPR@0.95 | GAN TPR@0.95 |
+|---|---|---|
+| photoreal | 0.859 | 0.966 |
+| trainext | **0.859** | **0.992** |
+
+**Diffusion did not move.** DALLE2 .550 -> .542, Midjourney .752 -> .736,
+ADM .626 -> .659 — all noise. +2.6 points of GAN recall on a family already at
+0.966, plus an FPR improvement attributable to the 5,178 reals.
+
+**Third time real-side data beat generator-side data in this project.** The
+pattern is consistent enough to plan around: adding REAL domains moves the
+numbers, adding generators mostly does not — unless the generators are ones we
+are actually failing on, which these were not.
+
+**Caveat on the ood gain.** `train_ext` was drawn from AIGC-bench positions
+8,400+ while `ood` occupies 1-8,400. The images are disjoint by construction but
+the SOURCE RENDITION is shared, so part of that +0.0054 mean AUC is
+source-matching rather than generalization. WildRF is a completely different
+source and improved independently, which is why the arm still ships. `val` stayed
+flat (0.9987 -> 0.9986), ruling out the reals-overlap inflation HANDOFF warned
+about.
+
+### Threshold is a property of the head, re-derive it on every swap
+
+Swept in 0.005 steps on WildRF pooled over clean + CDN-like views, split by
+image, F1-optimal on one half, reported on the other:
+
+| head | chosen | HELD-OUT FPR | HELD-OUT TPR |
+|---|---|---|---|
+| photoreal | 0.920 | .0408 | .9721 |
+| **trainext** | **0.940** | **.0283** | **.9686** |
+
+At matched FPR (~2.8%) the new head buys a full point of recall over the old one
+(.9686 vs .9584). Note the finer grid also moved photoreal's own optimum from the
+0.95 an earlier coarse sweep reported to 0.920 — the coarse grid was not wrong
+about the direction, just about the resolution.
+
+---
+
 ## 3. What was built
 
 ### Wave 1

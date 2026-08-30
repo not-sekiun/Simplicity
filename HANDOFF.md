@@ -9,24 +9,34 @@ below it where they disagree.**
 
 ## Ship this
 
-**`models/pe-core-l__linear__photoreal.pt`** at threshold **0.95**. Already the
+**`models/pe-core-l__linear__trainext.pt`** at threshold **0.94**. Already the
 default in `predict.py`, `main.py predict` and `demo/server.py`.
 
 ```
 uv run main.py train-head-views --backbone pe-core-l --with-chains \
-  --val-sample-rows 2000 --extra-train-manifest sid-real unsplash-real \
-  --balance --out models/pe-core-l__linear__photoreal.pt
+  --val-sample-rows 2000 --train-manifest train-ext \
+  --extra-train-manifest sid-real unsplash-real \
+  --balance --out models/pe-core-l__linear__trainext.pt
 ```
 
 | tier | clean AUC | 18-view mean | what it tests |
 |---|---|---|---|
-| `ood` | **0.9961** | 0.9620 | 10 generators absent from training |
-| `wildrf_test` | **0.9935** | 0.9743 | real Reddit/X/Facebook photos |
-| `demo_val` | 0.9990 | 0.9897 | the brief's 5.4 benchmark |
-| `val` | 0.9987 | — | in-distribution |
+| `ood` | **0.9978** | 0.9674 | 10 generators absent from training |
+| `wildrf_test` | **0.9945** | 0.9764 | real Reddit/X/Facebook photos |
+| `demo_val` | 0.9995 | 0.9907 | the brief's 5.4 benchmark |
+| `val` | 0.9986 | — | in-distribution |
 
-Weakest view everywhere: `noise_sigma0.1` (0.84-0.86). `chain_heavy` is below
+At threshold 0.94, held out: **FPR 2.83% / TPR 96.86%** on WildRF.
+
+Weakest view everywhere: `noise_sigma0.1` (0.85-0.86). `chain_heavy` is below
 every transform composing it — composition costs more than any single axis.
+
+The previous head, `pe-core-l__linear__photoreal.pt` (threshold 0.92), is
+superseded but kept: it is the arm trained WITHOUT `train_ext`, and therefore
+the control for anything that questions whether train_ext earned its place.
+
+**Threshold is a property of the head. Re-derive it on every swap** — the sweep
+is in FINDINGS 2j and takes about a minute on cached embeddings.
 
 ## What changed since the race
 
@@ -74,10 +84,11 @@ Two further facts to plan against:
 
 ## Next actions, in order
 
-1. **`train_ext` arm** — embedding in progress (30,919 rows x 11 views).
-   Expect little: of its 1,941 new AIGC rows, **1,617 are GAN** and only 324 are
-   diffusion (SD14, already 0.967 unseen). Its likely value is the 5,178 extra
-   REALS. Judge on WildRF + ood **at matched TPR**, never at 0.5.
+1. ~~**`train_ext` arm**~~ **DONE and shipped** — see FINDINGS 2j. The
+   prediction held exactly: +2.6 points of GAN recall (a family already at
+   0.966) and **zero movement on diffusion** (0.859 -> 0.859). What it did buy
+   was FPR, from the 5,178 extra reals: WildRF FPR@TPR.98 .0512 -> .0344. Third
+   time real-side data beat generator-side data here.
 2. **More ADM + Midjourney** from AIGC-bench positions 8,400+. Free: both are
    already seen, so no benchmark loses meaning, and they carry 37% and 25% miss
    rates at the shipping threshold.

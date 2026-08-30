@@ -37,7 +37,7 @@ image ──> aspect-preserving resize + centre crop to 336px
       ──> 1024-d pooled embedding
       ──> standardise with the TRAIN-set scaler stored in the checkpoint
       ──> Linear(1024 -> 1) ──> sigmoid ──> P(AIGC)
-      ──> threshold 0.95 ──> verdict
+      ──> threshold 0.94 ──> verdict
 ```
 
 **Backbone:** `timm/vit_pe_core_large_patch14_336.fb` (Meta Perception Encoder),
@@ -66,6 +66,10 @@ We tested deeper heads. Same data, same views, same seed, only the head differs:
 | **linear** | 0.9987 | 0.9620 | **0.9935** | **0.051** |
 | MLP (1×512) | **0.9996** | 0.9637 | 0.9867 | 0.109 |
 | MLP (1024, 512) | 0.9997 | 0.9597 | 0.9861 | 0.076 |
+
+*(Run on the previous training pool, before `train_ext` was added — all three
+arms share that pool, so the comparison is internally valid. The shipping head's
+absolute numbers are higher; see §6.)*
 
 **The ranking inverts between the tier you fit and the tier you ship to.** Both
 MLPs beat linear on validation by a margin that looks like a real upgrade, and
@@ -109,11 +113,11 @@ and the harder severities are **never trained on**, so the robustness numbers in
 
 ## 5. Data — what we used and why
 
-**Training** (35,800 images):
+**Training** (38,919 images):
 
 | corpus | n | role |
 |---|---|---|
-| Tiny-GenImage `train` | 23,800 | 7 generators + ImageNet reals |
+| `train_ext` | 30,919 | Tiny-GenImage's 7 generators + 6 more + ImageNet reals |
 | SID_Set reals | 4,000 | OpenImages-register real photographs |
 | Unsplash | 4,000 | curated photography — a real domain ImageNet does not cover |
 
@@ -136,6 +140,16 @@ real AI images as they actually circulate, already carrying platform compression
 time. Domain coverage of the REAL class was worth more than any architecture
 change we tried.
 
+**And it held on the third try.** `train_ext` added 6 new generators plus 5,178
+more real images. The generators moved the family we had already solved — GAN
+recall 0.966 → 0.992 — and moved diffusion **not at all** (0.859 → 0.859). The
+reals moved the thing we care about: WildRF FPR at matched recall .051 → .034.
+We predicted this from the corpus composition before running it, because 1,617 of
+its 1,941 new AI images are GAN.
+
+> **Talking point:** three times now, real-side data beat generator-side data.
+> That is the project's actual finding, and it is not what we expected going in.
+
 > **Show:** the corpus ledger page; the FPR-per-real-source table.
 
 ---
@@ -146,29 +160,29 @@ Per-view AUC for the shipping head. Views marked ✗ were **never trained on**.
 
 | view | trained | OOD AUC | WildRF AUC |
 |---|---|---|---|
-| clean | ✓ | 0.9961 | 0.9935 |
-| jpeg q90 | ✗ | 0.9918 | 0.9929 |
-| jpeg q70 | ✓ | 0.9905 | 0.9928 |
-| jpeg q50 | ✗ | 0.9892 | 0.9930 |
-| jpeg q30 | ✗ | 0.9786 | 0.9916 |
-| blur σ0.5 | ✗ | 0.9956 | 0.9932 |
-| blur σ1.0 | ✓ | 0.9886 | 0.9918 |
-| blur σ2.0 | ✗ | 0.9587 | 0.9855 |
-| resize 0.5× | ✓ | 0.9827 | 0.9908 |
-| resize 0.25× | ✗ | 0.9437 | 0.9799 |
-| noise σ0.02 | ✗ | 0.9478 | 0.9761 |
-| noise σ0.05 | ✓ | 0.9228 | 0.9182 |
-| **noise σ0.1** | ✗ | **0.8616** | **0.8373** |
-| colour jitter | ✓ | 0.9947 | 0.9928 |
-| centre crop 80% | ✓ | 0.9940 | 0.9925 |
-| chain light | ✗ | 0.9792 | 0.9903 |
-| chain medium | ✗ | 0.9346 | 0.9740 |
-| **chain heavy** | ✗ | **0.8665** | **0.9504** |
+| clean | ✓ | 0.9978 | 0.9945 |
+| jpeg q90 | ✗ | 0.9966 | 0.9946 |
+| jpeg q70 | ✓ | 0.9961 | 0.9936 |
+| jpeg q50 | ✗ | 0.9941 | 0.9930 |
+| jpeg q30 | ✗ | 0.9839 | 0.9921 |
+| blur σ0.5 | ✗ | 0.9968 | 0.9945 |
+| blur σ1.0 | ✓ | 0.9899 | 0.9934 |
+| blur σ2.0 | ✗ | 0.9650 | 0.9876 |
+| resize 0.5× | ✓ | 0.9841 | 0.9925 |
+| resize 0.25× | ✗ | 0.9559 | 0.9829 |
+| noise σ0.02 | ✗ | 0.9638 | 0.9786 |
+| noise σ0.05 | ✓ | 0.9346 | 0.9242 |
+| **noise σ0.1** | ✗ | **0.8619** | **0.8495** |
+| colour jitter | ✓ | 0.9965 | 0.9938 |
+| centre crop 80% | ✓ | 0.9972 | 0.9940 |
+| chain light | ✗ | 0.9859 | 0.9912 |
+| chain medium | ✗ | 0.9456 | 0.9749 |
+| **chain heavy** | ✗ | **0.8684** | **0.9507** |
 
-**Headline:** clean AUC **0.9961** against 10 unseen generators; **0.9935** on
-real social media; 18-view mean **0.9620** / **0.9743**.
+**Headline:** clean AUC **0.9978** against 10 unseen generators; **0.9945** on
+real social media; 18-view mean **0.9674** / **0.9764**.
 
-**Weakest point, stated plainly:** heavy additive noise (σ0.1), at 0.84–0.86.
+**Weakest point, stated plainly:** heavy additive noise (σ0.1), at 0.85–0.86.
 Composition costs more than any single axis — `chain_heavy` is well below every
 transform it is built from, which a single-transform grid cannot see.
 
@@ -215,32 +229,39 @@ Correcting it moved OOD clean AUC from 0.9670 to **0.9961**.
 
 ## 8. Error analysis (§5.5.5)
 
-**False positives — what still trips it.** Real social media photography, ~18%
-at threshold 0.5, concentrated in enthusiast/edited photography rather than
-casual snapshots. Per platform: Facebook 24.4%, Reddit 18.7%, Twitter 14.7%.
+**False positives — what still trips it.** Real social media photography,
+concentrated in enthusiast/edited photography rather than casual snapshots.
 Web-snapshot imagery (Google Images register) barely trips at all — that domain
 is closest to the ImageNet-derived training reals.
 
+| | overall FPR | Facebook | Reddit | Twitter | TPR |
+|---|---|---|---|---|---|
+| at 0.50 | 16.9% | 21.2% | 17.5% | 13.8% | 99.4% |
+| **at 0.94 (shipping)** | **3.1%** | 4.4% | 2.7% | 3.5% | **97.6%** |
+
 **Why:** the training pool's real half was one dataset. Any real image from an
 absent domain drifts upward. This is a *calibration* gap, not a representation
-one — the ranking stays intact (AUC 0.9935), the scores just shift.
+one — the ranking stays intact (AUC 0.9945), the scores just shift.
 
-**Which is why the threshold is 0.95, not 0.5:**
+**Which is why the threshold is 0.94, not 0.5:**
 
 | threshold | FPR | TPR |
 |---|---|---|
 | 0.50 | 18.8% | 99.5% |
-| **0.95** | **2.8%** | **95.8%** |
-| 0.99 | 0.9% | 89.0% |
+| **0.94** | **2.8%** | **96.9%** |
 
-Chosen on a **held-out split** — WildRF split by image, threshold picked by F1 on
-one half and reported on the other, so it is not tuned on the tier it is reported
-against. A 6.7× reduction in false positives for 3.7 points of recall. For this
-product that trade is correct: telling someone their own photograph is fake costs
-far more than missing one AI image among many.
+Chosen on a **held-out split** — WildRF split by image, swept in 0.005 steps,
+picked by F1 on one half and reported on the other, so it is not tuned on the
+tier it is reported against. A ~6.6× reduction in false positives for ~2.6
+points of recall. For this product that trade is correct: telling someone their
+own photograph is fake costs far more than missing one AI image among many.
 
-**False negatives.** Per-generator recall at 0.5 on the unseen tier, weakest
-first: **DALLE2 0.817**, Midjourney 0.876, ADM 0.894 — everything else is ≥0.97.
+The threshold is a property of the head, not a constant — we re-derive it on
+every model swap, and it moved from 0.92 to 0.94 when the head changed.
+
+**False negatives.** Per-generator recall at the shipping threshold on the unseen
+tier, weakest first: **DALLE2 0.542**, ADM 0.683, Midjourney 0.736, GLIDE 0.943 —
+everything else is ≥0.95. By family: **GAN 0.992, diffusion 0.859**.
 
 Worth stating rather than burying: DALLE2 is both the weakest generator *and* a
 **diffusion** model held out of training, i.e. squarely in the brief's threat
@@ -263,7 +284,7 @@ from the checkpoint — swap `--head` to a different backbone entirely and the
 extension needs no changes.
 
 > **Show, in order:** an AI-art subreddit (flags reliably) → r/itookapicture
-> (mostly clean at 0.95) → a Google Images search → a deliberate hard case.
+> (mostly clean at 0.94) → a Google Images search → a deliberate hard case.
 
 ---
 
@@ -271,7 +292,7 @@ extension needs no changes.
 
 1. **Real-domain coverage is still the binding constraint.** Two real domains
    added; more would keep helping. This is the whole remaining problem.
-2. **Heavy noise and heavy composed degradation** drop to ~0.84–0.87 AUC.
+2. **Heavy noise and heavy composed degradation** drop to ~0.85–0.87 AUC.
 3. **Threshold is global.** Per-domain thresholds would beat one number, and
    temperature calibration is unimplemented.
 4. **GAN families are reported separately** and treated as out of scope; the
@@ -285,7 +306,7 @@ extension needs no changes.
 
 ## 11. Takeaway
 
-**A frozen VFM with a linear probe genuinely works.** 0.9961 clean AUC against
+**A frozen VFM with a linear probe genuinely works.** 0.9978 clean AUC against
 ten generators it has never seen, from 1,025 trainable parameters on a consumer
 GPU. We tested the obvious upgrade — deeper heads — and it made real-world
 performance *worse*.

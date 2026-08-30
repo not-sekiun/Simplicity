@@ -1,16 +1,21 @@
 // content.js -- finds <img> elements, scores the ones large enough to
 // matter as they scroll into view, and overlays a confidence-colored
-// outline + "AI NN%" tag on the ones flagged.
+// outline + "AI NN%" tag on the ones flagged. Also samples <video> elements
+// (TikTok/Instagram/YouTube Shorts-style feeds) every few seconds while
+// they're playing on-screen, for the same treatment -- see "video scoring"
+// below for why that's a materially different tracking problem than <img>.
 //
-// THE ABSTRACTION: this file talks to the model through exactly one call,
-// chrome.runtime.sendMessage({type: "SCORE_BATCH", urls}), and gets back
-// [{url, pred}, ...]. It has zero knowledge of backbones, checkpoints, or
-// parameter counts -- swap demo/server.py's --head to a retrained or
-// entirely different backbone and nothing here changes.
+// THE ABSTRACTION: this file talks to the model through exactly two calls,
+// chrome.runtime.sendMessage({type: "SCORE_BATCH", urls}) for images and
+// {type: "SCORE_FRAME", frame} (one base64 JPEG, captured from a <video> via
+// canvas) for video, and gets back {url, pred}/{pred} shapes. It has zero
+// knowledge of backbones, checkpoints, or parameter counts -- swap
+// demo/server.py's --head to a retrained or entirely different backbone and
+// nothing here changes.
 
 (async () => {
-  const DEFAULTS = { threshold: 0.5, minSize: 150 };
-  const { threshold: AIGC_THRESHOLD, minSize: MIN_SIZE } = await loadConfig();
+  const DEFAULTS = { threshold: 0.5, minSize: 150, debugMode: false };
+  const { threshold: AIGC_THRESHOLD, minSize: MIN_SIZE, debugMode: DEBUG_MODE } = await loadConfig();
 
   const BATCH_SIZE = 6;
   const BATCH_DELAY_MS = 150; // debounce so fast scrolling coalesces into one request
@@ -21,7 +26,7 @@
   const MAX_ASPECT = 3.0; // wider than ~3:1
 
   async function loadConfig() {
-    const stored = await chrome.storage.local.get(["threshold", "minSize"]);
+    const stored = await chrome.storage.local.get(["threshold", "minSize", "debugMode"]);
     return { ...DEFAULTS, ...stored };
   }
 
@@ -67,11 +72,21 @@
   let pending = [];
   let flushTimer = null;
 
+  // One continuous scale, green -> yellow -> red, so debug mode (which
+  // shows a badge below the threshold too) doesn't need a second unrelated
+  // color scheme: green (confidently real, pred near 0) rises to yellow
+  // exactly AT the threshold from both sides, then yellow -> red as
+  // confidence in "AI-generated" rises to 1. Only the >= threshold half
+  // is ever seen outside debug mode.
   function badgeColor(pred) {
-    // yellow (just over threshold) -> red (fully confident)
-    const t = Math.max(0, Math.min(1, (pred - AIGC_THRESHOLD) / (1 - AIGC_THRESHOLD)));
-    const g = Math.round(200 * (1 - t));
-    return `rgb(255, ${g}, 0)`;
+    if (pred >= AIGC_THRESHOLD) {
+      const t = Math.max(0, Math.min(1, (pred - AIGC_THRESHOLD) / (1 - AIGC_THRESHOLD)));
+      const g = Math.round(200 * (1 - t));
+      return `rgb(255, ${g}, 0)`;
+    }
+    const t = AIGC_THRESHOLD > 0 ? Math.max(0, Math.min(1, pred / AIGC_THRESHOLD)) : 1;
+    const r = Math.round(255 * t);
+    return `rgb(${r}, 200, 0)`;
   }
 
   function ensureOverlayRoot() {
@@ -91,19 +106,20 @@
   // and hide the badge whenever something else is frontmost there, so the
   // label disappears in lockstep with the box it's annotating instead of
   // floating in front of whatever is now covering it.
-  function isImageOccluded(img, r) {
+  function isElementOccluded(el, r) {
     const cx = r.left + r.width / 2;
     const cy = r.top + r.height / 2;
     if (cx < 0 || cy < 0 || cx > window.innerWidth || cy > window.innerHeight) {
       return false; // off-screen -- not "covered", just out of the viewport
     }
     const top = document.elementFromPoint(cx, cy);
-    return !!top && top !== img && !img.contains(top) && !top.contains(img);
+    return !!top && top !== el && !el.contains(top) && !top.contains(el);
   }
 
-  function positionBadge(img, badge) {
-    const r = img.getBoundingClientRect();
-    if (r.width === 0 || r.height === 0 || isImageOccluded(img, r)) {
+  // Shared by both <img> and <video> badges.
+  function positionBadge(el, badge) {
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0 || isElementOccluded(el, r)) {
       badge.style.display = "none";
       return;
     }
@@ -137,7 +153,11 @@
   function applyResult(img, src, result) {
     if ("error" in result) return;
     const pred = result.pred;
-    if (pred < AIGC_THRESHOLD) {
+    // DEBUG_MODE: annotate every scored image regardless of threshold, so
+    // you can see what the model is actually saying about images it
+    // wouldn't otherwise flag -- badgeColor() goes green for a confidently
+    // "real" pred instead of clearing the outline/badge outright.
+    if (pred < AIGC_THRESHOLD && !DEBUG_MODE) {
       img.style.outline = "";
       removeBadge(src);
       return;
@@ -168,6 +188,18 @@
       // (an inline style on the element itself) already vanished along
       // with the element; the label must go with it, not linger.
       if (!placed) removeBadge(src);
+    }
+
+    // Video badges are keyed by element, not src (see "video scoring"
+    // below), so there's no multi-element fallback to try -- an
+    // element that's gone just loses its badge outright.
+    for (const [video, state] of videoState) {
+      if (!video.isConnected) {
+        clearVideoIndicator(video);
+        videoState.delete(video);
+      } else if (state.badge) {
+        positionBadge(video, state.badge);
+      }
     }
   }
 
@@ -273,12 +305,130 @@
     }
   }
 
-  function scan(root) {
-    if (root.tagName === "IMG") considerImage(root);
-    if (root.querySelectorAll) root.querySelectorAll("img").forEach(considerImage);
+  // ---- video scoring ---------------------------------------------------
+  //
+  // Images are cached by `src` because the same photo genuinely recurs (a
+  // repeated avatar, a reposted thumbnail). Video on a short-form feed has
+  // no equivalent: a <video>'s `src`/`currentSrc` is typically a per-clip
+  // `blob:` URL handed out by MediaSource, and the feed reuses a small pool
+  // of <video> elements, loading a brand new clip into the SAME element as
+  // you scroll past it. So state here is keyed by the element itself, not
+  // a src -- there's no "already scored" cache, only "currently sampling
+  // whatever clip is loaded into this element right now" -- and it's
+  // explicitly reset the instant that clip changes underneath us.
+  const VIDEO_SAMPLE_INTERVAL_MS = 3000; // a couple of seconds is fine --
+  // this isn't meant to be frame-accurate, and it keeps request volume sane
+  // against a server that scores one batch at a time (see server.py).
+  const VIDEO_FRAME_MAX_SIDE = 480; // downscaled before sending -- the
+  // backbone re-resizes to its own native_res anyway (see server.py), so
+  // shipping a full 1080x1920 frame over sendMessage would be pure waste.
+  const VIDEO_EMA_ALPHA = 0.6; // weight on the newest sample when smoothing
+  // -- damps single-frame noise (motion blur, a mid-transition frame)
+  // without lagging far behind a real change in the model's read.
+
+  const videoState = new Map(); // <video> -> { badge, ema, inFlight }
+
+  function clearVideoIndicator(video) {
+    video.style.outline = "";
+    const state = videoState.get(video);
+    if (state) {
+      state.ema = null;
+      if (state.badge) {
+        state.badge.remove();
+        state.badge = null;
+      }
+    }
   }
 
-  // Mirror of scan(): drop a removed <img> from trackedEls immediately
+  function applyVideoScore(video, pred) {
+    const state = videoState.get(video);
+    if (!state) return; // untracked (removed/clip-changed) while the request was in flight
+    state.ema = state.ema == null ? pred : VIDEO_EMA_ALPHA * pred + (1 - VIDEO_EMA_ALPHA) * state.ema;
+    const smoothed = state.ema;
+    if (smoothed < AIGC_THRESHOLD && !DEBUG_MODE) { // see applyResult()'s DEBUG_MODE comment
+      clearVideoIndicator(video);
+      return;
+    }
+    video.style.outline = `4px solid ${badgeColor(smoothed)}`;
+    video.style.outlineOffset = "-2px";
+    if (!state.badge) {
+      state.badge = document.createElement("div");
+      state.badge.className = "__aigc_detect_badge__";
+      ensureOverlayRoot().appendChild(state.badge);
+    }
+    state.badge.textContent = `AI ${(smoothed * 100).toFixed(0)}%`;
+    state.badge.style.background = badgeColor(smoothed);
+    positionBadge(video, state.badge);
+  }
+
+  // Returns a base64 JPEG data URL, or null if the frame isn't capturable
+  // right now (no decoded dimensions yet) or the site's CDN taints the
+  // canvas on drawImage (verified NOT the case for TikTok/Instagram/YouTube
+  // Shorts, but sites vary -- fail quiet rather than spam the console).
+  function captureFrame(video) {
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    if (!vw || !vh) return null;
+    const scale = Math.min(1, VIDEO_FRAME_MAX_SIDE / Math.max(vw, vh));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(vw * scale);
+    canvas.height = Math.round(vh * scale);
+    try {
+      canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL("image/jpeg", 0.85);
+    } catch {
+      return null;
+    }
+  }
+
+  function sampleVideo(video, state) {
+    const frame = captureFrame(video);
+    if (!frame) return;
+    state.inFlight = true;
+    chrome.runtime.sendMessage({ type: "SCORE_FRAME", frame }, (resp) => {
+      state.inFlight = false;
+      if (!videoState.has(video)) return; // removed/reset while this was in flight
+      if (!resp || !resp.ok || resp.error) return; // server unreachable/loading -- just skip this tick
+      applyVideoScore(video, resp.pred);
+    });
+  }
+
+  function videoTick() {
+    for (const [video, state] of videoState) {
+      if (!video.isConnected) {
+        clearVideoIndicator(video);
+        videoState.delete(video);
+        continue;
+      }
+      if (state.inFlight || video.paused || video.readyState < video.HAVE_CURRENT_DATA) continue;
+      const r = video.getBoundingClientRect();
+      if (r.width < MIN_SIZE || r.height < MIN_SIZE) continue;
+      if (r.bottom <= 0 || r.top >= window.innerHeight || r.right <= 0 || r.left >= window.innerWidth) continue;
+      sampleVideo(video, state);
+    }
+  }
+  setInterval(videoTick, VIDEO_SAMPLE_INTERVAL_MS);
+
+  function considerVideo(video) {
+    if (videoState.has(video)) return;
+    videoState.set(video, { badge: null, ema: null, inFlight: false });
+    // Fires when a reused element starts loading a NEW clip -- the previous
+    // clip's score is now about a completely different video, so clear it
+    // immediately rather than letting it ride over (visibly stale) until
+    // the next sample tick relabels it a few seconds later.
+    video.addEventListener("loadstart", () => clearVideoIndicator(video));
+  }
+
+  function scan(root) {
+    if (root.tagName === "IMG") considerImage(root);
+    if (root.tagName === "VIDEO") considerVideo(root);
+    if (root.querySelectorAll) {
+      root.querySelectorAll("img").forEach(considerImage);
+      root.querySelectorAll("video").forEach(considerVideo);
+    }
+  }
+
+  // Mirror of scan(): drop a removed <img>/<video> from tracking immediately
   // (rather than waiting for the next scroll/resize to notice via
   // repositionAll) so its badge disappears the moment the box it's
   // annotating does, instead of lingering until the user happens to scroll.
@@ -290,6 +440,12 @@
       if (!els) continue;
       els.delete(img);
       if (els.size === 0) removeBadge(src);
+    }
+
+    const videos = root.tagName === "VIDEO" ? [root] : root.querySelectorAll ? [...root.querySelectorAll("video")] : [];
+    for (const video of videos) {
+      clearVideoIndicator(video);
+      videoState.delete(video);
     }
   }
 
@@ -309,6 +465,11 @@
         // after the initial load -- re-consider so the upgrade gets scored.
         delete m.target.dataset.aigcObserved;
         considerImage(m.target);
+      } else if (m.type === "attributes" && m.target.tagName === "VIDEO") {
+        // A site that swaps clips via the `src` attribute directly (rather
+        // than MediaSource, which fires `loadstart` on its own -- see
+        // considerVideo) needs the same "new clip, stale score" reset here.
+        clearVideoIndicator(m.target);
       }
     }
   });

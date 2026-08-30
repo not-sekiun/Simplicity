@@ -1,9 +1,15 @@
 const DEFAULT_SERVER = "http://127.0.0.1:8765";
 const DEFAULT_THRESHOLD = 0.5;
 const DEFAULT_MIN_SIZE = 150;
+const DEFAULT_DEBUG_MODE = false;
 
 async function refresh() {
-  const { serverBase, threshold, minSize } = await chrome.storage.local.get(["serverBase", "threshold", "minSize"]);
+  const { serverBase, threshold, minSize, debugMode } = await chrome.storage.local.get([
+    "serverBase",
+    "threshold",
+    "minSize",
+    "debugMode",
+  ]);
   document.getElementById("serverUrl").value = serverBase || DEFAULT_SERVER;
   const t = threshold ?? DEFAULT_THRESHOLD;
   document.getElementById("threshold").value = t;
@@ -11,6 +17,7 @@ async function refresh() {
   const m = minSize ?? DEFAULT_MIN_SIZE;
   document.getElementById("minSize").value = m;
   document.getElementById("minSizeVal").textContent = `${m}px`;
+  document.getElementById("debugMode").checked = debugMode ?? DEFAULT_DEBUG_MODE;
 
   chrome.runtime.sendMessage({ type: "HEALTH" }, (resp) => {
     const dot = document.getElementById("dot");
@@ -40,7 +47,8 @@ document.getElementById("save").addEventListener("click", async () => {
   const url = document.getElementById("serverUrl").value.trim();
   const threshold = parseFloat(document.getElementById("threshold").value);
   const minSize = parseInt(document.getElementById("minSize").value, 10);
-  await chrome.storage.local.set({ serverBase: url || DEFAULT_SERVER, threshold, minSize });
+  const debugMode = document.getElementById("debugMode").checked;
+  await chrome.storage.local.set({ serverBase: url || DEFAULT_SERVER, threshold, minSize, debugMode });
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab && tab.id) chrome.tabs.reload(tab.id); // content.js reads config once at page load

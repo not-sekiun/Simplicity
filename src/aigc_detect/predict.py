@@ -123,23 +123,25 @@ def _to_posix_relative(path: Path, input_dir: Path) -> str:
 # boundary for the console summary, for demo/server.py, and for anything else
 # that needs a yes/no rather than a score.
 #
-# 0.95, not 0.5. Chosen on a HELD-OUT split so the number is not tuned on the
+# 0.94, not 0.5. Chosen on a HELD-OUT split so the number is not tuned on the
 # tier it is reported against: WildRF (2,503 real Reddit/X/Facebook photographs
 # and real-world AI) pooled over clean + the CDN-like views a browser extension
 # actually sees (jpeg_q70, jpeg_q90, resize_0.5x, chain_light), split by IMAGE so
-# no image appears on both sides, threshold picked by F1 on one half and reported
-# on the other:
+# no image appears on both sides, threshold swept in 0.005 steps and picked by F1
+# on one half, then reported on the other:
 #
-#     threshold    dev FPR   dev TPR  |  HELD-OUT FPR   HELD-OUT TPR
-#     0.50          0.1879    0.9916  |        0.1875         0.9949
-#     0.90          0.0601    0.9740  |        0.0527         0.9765
-#     0.95          0.0366    0.9550  |        0.0280         0.9584   <-- chosen
-#     0.99          0.0137    0.8910  |        0.0090         0.8902
+#     head        chosen   HELD-OUT FPR   HELD-OUT TPR
+#     photoreal    0.920         0.0408         0.9721
+#     trainext     0.940         0.0283         0.9686   <-- shipping
 #
-# 6.7x fewer false positives than 0.5 for 3.7 points of recall. That trade is
-# right for this product: the cost of calling someone's own photograph
-# AI-generated is much higher than missing one AI image among many.
-DECISION_THRESHOLD = 0.95
+# At threshold 0.5 the same tier gives FPR 0.1875 / TPR 0.9949, so this is a
+# ~6.6x cut in false positives for ~2.6 points of recall. That trade is right
+# for this product: telling someone their own photograph is AI-generated costs
+# far more than missing one AI image among many.
+#
+# Re-derive this whenever the head changes -- it is a property of the head, not
+# a constant. The sweep lives in FINDINGS 2j.
+DECISION_THRESHOLD = 0.94
 
 
 def run_inference(

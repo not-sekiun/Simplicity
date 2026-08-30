@@ -78,6 +78,11 @@
     <div class="row" style="margin-top:10px"><span>server URL</span></div>
     <input id="serverUrl" type="text" />
 
+    <div class="row" style="margin-top:10px">
+      <span>debug mode (annotate everything)</span>
+      <input id="debugMode" type="checkbox" />
+    </div>
+
     <button id="save">Save &amp; reload page</button>
 
     <p class="hint">
@@ -85,6 +90,11 @@
       screen in both dimensions. Decorative/background images (marked as such by the page, or shaped like a
       banner rather than a photo) are skipped regardless of size. Requires the local inference server running:
       <code>uv run python demo/server.py</code>.
+    </p>
+    <p class="hint">
+      <strong>Debug mode</strong> shows a badge on every image/video actually scored, not just the ones over
+      threshold — green (confidently real) fading through yellow (at the threshold) to red (confidently AI), so
+      you can sanity-check the model on things it isn't flagging, not just the ones it is.
     </p>
 
     <script src="popup.js"></script>

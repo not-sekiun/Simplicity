@@ -485,7 +485,7 @@ def cmd_error_analysis(args):
 def cmd_predict(args):
     from aigc_detect.predict import run_inference
 
-    head_path = Path(args.head) if args.head else ROOT_DIR / "models" / "pe-core-l__linear__photoreal.pt"
+    head_path = Path(args.head) if args.head else ROOT_DIR / "models" / "pe-core-l__linear__trainext.pt"
     if not head_path.exists():
         print(f"No head checkpoint at {head_path}. Pass --head <path> or train one first.")
         sys.exit(1)
@@ -734,11 +734,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_predict.add_argument("--output", required=True, help="Path to write the JSON predictions array to.")
     p_predict.add_argument(
         "--head", default=None,
-        help="Head checkpoint path (default: models/pe-core-l__linear__photoreal.pt).",
+        help="Head checkpoint path (default: models/pe-core-l__linear__trainext.pt).",
     )
     p_predict.add_argument("--threshold", type=float, default=None,
                            help="Decision boundary for the flagged/not-flagged summary line "
-                                "(default: predict.DECISION_THRESHOLD = 0.95, chosen on a held-out "
+                                "(default: predict.DECISION_THRESHOLD = 0.94, chosen on a held-out "
                                 "WildRF split). Does NOT change the JSON, which always carries the "
                                 "raw probability in 'pred' as the brief requires.")
     p_predict.add_argument("--batch-size", type=int, default=32)

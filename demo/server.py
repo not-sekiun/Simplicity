@@ -22,18 +22,28 @@ changes; the /health endpoint's backbone/head fields are for the popup UI
 to *display*, not for the extension to branch on.
 
     uv sync --extra demo
-    uv run python demo/server.py --head models/pe-core-l__linear__photoreal.pt
+    uv run python demo/server.py --head models/pe-core-l__linear__trainext.pt
 
 Endpoints:
     GET  /health                        {"ready": bool, "backbone": str, "head": str}
     POST /score       {"url": str}      {"url": str, "pred": float} | {"url": str, "error": str}
     POST /score_batch {"urls": [str]}   {"results": [ ...one of the above per url... ]}
+    POST /score_frame {"frame": str}    {"pred": float} | {"error": str}
+
+/score_frame exists for the extension's video path: a sampled <video> frame
+(captured client-side via canvas, since browsers can't hand out a fetchable
+URL for "the current frame of this playing video") has no URL for this
+server to fetch the way /score and /score_batch do -- it arrives as a
+base64-encoded JPEG data URL instead and is decoded straight to bytes.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import io
+import logging
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -55,7 +65,7 @@ from aigc_detect.config import ROOT_DIR  # noqa: E402
 from aigc_detect.heads import build_head  # noqa: E402
 from aigc_detect.transforms import build_backbone_transform  # noqa: E402
 
-DEFAULT_HEAD = ROOT_DIR / "models" / "pe-core-l__linear__photoreal.pt"
+DEFAULT_HEAD = ROOT_DIR / "models" / "pe-core-l__linear__trainext.pt"
 FETCH_TIMEOUT = 6.0
 FETCH_HEADERS = {
     # Reddit/Instagram reject or throttle requests with no browser-like UA.
@@ -64,6 +74,8 @@ FETCH_HEADERS = {
 }
 _FETCH_POOL = ThreadPoolExecutor(max_workers=8)
 
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 class Model:
     """Loaded once at startup. Holds exactly the state predict.py's
@@ -158,6 +170,19 @@ class ScoreBatchRequest(BaseModel):
     urls: list[str]
 
 
+class ScoreFrameRequest(BaseModel):
+    frame: str  # "data:image/jpeg;base64,...." or bare base64
+
+
+def _decode_frame(data_url: str) -> Image.Image | Exception:
+    try:
+        b64 = data_url.split(",", 1)[1] if data_url.startswith("data:") else data_url
+        raw = base64.b64decode(b64)
+        return Image.open(io.BytesIO(raw)).convert("RGB")
+    except (ValueError, OSError, UnidentifiedImageError, binascii.Error) as exc:
+        return exc
+
+
 @app.get("/health")
 def health():
     if model is None:
@@ -173,6 +198,7 @@ def score(req: ScoreRequest):
     if isinstance(img, Exception):
         return {"url": req.url, "error": f"{type(img).__name__}: {img}"}
     pred = model.score([img])[0]
+    logger.info(f"{pred=}")
     return {"url": req.url, "pred": pred}
 
 
@@ -191,9 +217,22 @@ def score_batch(req: ScoreBatchRequest):
             ok_urls.append(u)
 
     preds = model.score(images)
+    logger.info(f"{preds=}")
     for u, p in zip(ok_urls, preds):
         results.append({"url": u, "pred": p})
     return {"results": results}
+
+
+@app.post("/score_frame")
+def score_frame(req: ScoreFrameRequest):
+    if model is None:
+        return {"error": "model not loaded"}
+    img = _decode_frame(req.frame)
+    if isinstance(img, Exception):
+        return {"error": f"{type(img).__name__}: {img}"}
+    pred = model.score([img])[0]
+    logger.info(f"{pred=}")
+    return {"pred": pred}
 
 
 def main():
