@@ -496,6 +496,7 @@ def cmd_predict(args):
         output_path=args.output,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
+        threshold=args.threshold,
     )
 
 
@@ -663,7 +664,7 @@ def build_parser() -> argparse.ArgumentParser:
                             "severities already in the default set). The 3 SCORED chains stay held out.")
     p_thv.add_argument("--clean-only", action="store_true",
                        help="Control arm: train on the clean view alone, same images, same scaler.")
-    p_thv.add_argument("--head", default="linear", choices=["linear", "mlp"])
+    p_thv.add_argument("--head", default="linear", choices=["linear", "mlp", "mlp2"])
     p_thv.add_argument("--epochs", type=int, default=2)
     p_thv.add_argument("--lr", type=float, default=1e-3)
     p_thv.add_argument("--batch-size", type=int, default=128)
@@ -735,6 +736,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--head", default=None,
         help="Head checkpoint path (default: models/pe-core-l__linear__photoreal.pt).",
     )
+    p_predict.add_argument("--threshold", type=float, default=None,
+                           help="Decision boundary for the flagged/not-flagged summary line "
+                                "(default: predict.DECISION_THRESHOLD = 0.95, chosen on a held-out "
+                                "WildRF split). Does NOT change the JSON, which always carries the "
+                                "raw probability in 'pred' as the brief requires.")
     p_predict.add_argument("--batch-size", type=int, default=32)
     p_predict.add_argument("--num-workers", type=int, default=4)
     p_predict.set_defaults(func=cmd_predict)

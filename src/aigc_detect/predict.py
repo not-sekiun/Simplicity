@@ -116,13 +116,41 @@ def _to_posix_relative(path: Path, input_dir: Path) -> str:
     return rel.as_posix()
 
 
+# Operating point for turning P(AIGC) into a verdict.
+#
+# The JSON contract is fixed by the brief -- {"image_path", "pred"} with pred the
+# raw probability -- so this never changes what is written. It sets the decision
+# boundary for the console summary, for demo/server.py, and for anything else
+# that needs a yes/no rather than a score.
+#
+# 0.95, not 0.5. Chosen on a HELD-OUT split so the number is not tuned on the
+# tier it is reported against: WildRF (2,503 real Reddit/X/Facebook photographs
+# and real-world AI) pooled over clean + the CDN-like views a browser extension
+# actually sees (jpeg_q70, jpeg_q90, resize_0.5x, chain_light), split by IMAGE so
+# no image appears on both sides, threshold picked by F1 on one half and reported
+# on the other:
+#
+#     threshold    dev FPR   dev TPR  |  HELD-OUT FPR   HELD-OUT TPR
+#     0.50          0.1879    0.9916  |        0.1875         0.9949
+#     0.90          0.0601    0.9740  |        0.0527         0.9765
+#     0.95          0.0366    0.9550  |        0.0280         0.9584   <-- chosen
+#     0.99          0.0137    0.8910  |        0.0090         0.8902
+#
+# 6.7x fewer false positives than 0.5 for 3.7 points of recall. That trade is
+# right for this product: the cost of calling someone's own photograph
+# AI-generated is much higher than missing one AI image among many.
+DECISION_THRESHOLD = 0.95
+
+
 def run_inference(
     input_dir: str | Path,
     head_path: str | Path,
     output_path: str | Path,
     batch_size: int = 32,
     num_workers: int = 4,
+    threshold: float | None = None,
 ) -> Path:
+    threshold = DECISION_THRESHOLD if threshold is None else float(threshold)
     input_dir = Path(input_dir)
     head_path = Path(head_path)
     output_path = Path(output_path)
@@ -228,6 +256,10 @@ def run_inference(
 
     n_skipped = len(ds.skipped)
     print(f"[predict] wrote {len(results)} prediction(s) -> {output_path}")
+    # Summary only -- the JSON above carries raw probabilities, unchanged.
+    n_flagged = int((all_probs >= threshold).sum())
+    print(f"[predict] at threshold {threshold:g}: {n_flagged} of {len(results)} "
+          f"flagged AIGC ({n_flagged / max(len(results), 1):.1%})")
     if n_skipped:
         print(f"[predict] {n_skipped} file(s) skipped as unreadable/corrupt (see warnings above)")
     return output_path

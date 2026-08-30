@@ -318,6 +318,23 @@ def precompute_view_embeddings(
         unknown = set(views) - set(all_pipelines)
         if unknown:
             raise KeyError(f"Unknown view(s) {sorted(unknown)}. Available: {list(all_pipelines)}")
+        # An explicit --views list wins, which means include_train_chains has no
+        # effect here. Say so instead of silently dropping the 4 chain views:
+        # the caller asked for them, the cache would come back 7 views deep, and
+        # train-head-views --with-chains would then fail on a missing view with
+        # no hint that a flag had been ignored. (Same failure shape as the
+        # only_generators filter that was declared, printed, and never applied.)
+        if include_train_chains:
+            missing = [v for v in train_chain_view_names() if v not in views]
+            if missing:
+                raise SystemExit(
+                    f"[embed-views] --train-chains was passed together with an explicit --views "
+                    f"list that omits {missing}. An explicit list is used verbatim, so the chain "
+                    f"views would be silently skipped.\n"
+                    f"          Either drop --views (the default set honours --train-chains), or "
+                    f"name all of them:\n"
+                    f"          --views {' '.join(list(views) + missing)}"
+                )
         all_pipelines = {k: all_pipelines[k] for k in views}
     else:
         # Default to the 18 SCORED views. The trainchain_* views are

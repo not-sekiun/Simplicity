@@ -22,16 +22,37 @@ class LinearHead(nn.Module):
 
 
 class MLPHead(nn.Module):
-    """Optional richer head: Linear -> ReLU -> Dropout -> Linear."""
+    """Optional richer head: [Linear -> ReLU -> Dropout] x N -> Linear.
 
-    def __init__(self, in_dim: int, hidden: int = 512, dropout: float = 0.2):
+    `hidden` takes an int for one hidden layer (the original behaviour) or a
+    sequence for a deeper stack, e.g. (1024, 512) for two.
+
+    Depth is a genuine question here rather than a free upgrade. The frozen
+    backbone has already done the representation learning; the head's only job
+    is to find a decision boundary in that space. Capacity spent past that goes
+    into fitting the TRAINING generators, and the thing we actually need is
+    generalization to generators nobody has seen. UniversalFakeDetect (Ojha et
+    al., CVPR 2023) is the canonical result: on frozen CLIP features, nearest-
+    neighbour and linear probing transfer to unseen generators far better than
+    a trained deep classifier does, and the deep classifier's advantage on the
+    training distribution inverts off it. "Simplicity Prevails"
+    (arXiv:2602.01738), the recipe this project follows, likewise uses a single
+    linear layer.
+
+    So measure any MLP on the UNSEEN-generator tier, not on val. See
+    FINDINGS "head depth ablation" for what we actually got.
+    """
+
+    def __init__(self, in_dim: int, hidden: int | tuple[int, ...] = 512, dropout: float = 0.2):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(in_dim, hidden),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden, 1),
-        )
+        dims = (hidden,) if isinstance(hidden, int) else tuple(hidden)
+        layers: list[nn.Module] = []
+        prev = in_dim
+        for h in dims:
+            layers += [nn.Linear(prev, h), nn.ReLU(), nn.Dropout(dropout)]
+            prev = h
+        layers.append(nn.Linear(prev, 1))
+        self.net = nn.Sequential(*layers)
 
     def forward(self, x):
         return self.net(x)
@@ -42,5 +63,8 @@ def build_head(kind: str, in_dim: int, **kwargs) -> nn.Module:
         return LinearHead(in_dim)
     elif kind == "mlp":
         return MLPHead(in_dim, **kwargs)
+    elif kind == "mlp2":
+        kwargs.setdefault("hidden", (1024, 512))
+        return MLPHead(in_dim, **kwargs)
     else:
-        raise ValueError(f"Unknown head kind '{kind}'. Expected 'linear' or 'mlp'.")
+        raise ValueError(f"Unknown head kind '{kind}'. Expected 'linear', 'mlp' or 'mlp2'.")

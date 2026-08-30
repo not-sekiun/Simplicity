@@ -866,6 +866,40 @@ faces. They have **not** been recomputed and should not be cited until they are.
 
 ---
 
+## 2i. Head depth ablation: the linear probe wins where it matters (2026-08-30)
+
+Free to test -- the embeddings already exist, so each arm is ~90s of CPU. Same
+data, same 11 training views, same `--balance`, same seed; only the head differs.
+
+| head | val clean | val robust | OOD mean AUC | **WildRF clean AUC** | **WildRF FPR@TPR.98** |
+|---|---|---|---|---|---|
+| **linear** | 0.9987 | 0.9754 | 0.9620 | **0.9935** | **0.0512** |
+| mlp (1x512) | 0.9996 | 0.9820 | 0.9637 | 0.9867 | 0.1087 |
+| mlp2 (1024,512) | 0.9997 | 0.9817 | 0.9597 | 0.9861 | 0.0759 |
+
+**The ranking inverts between the tier you fit and the tier you ship to.** Both
+MLPs beat linear on val -- by enough to look like a real upgrade -- and both are
+decisively worse on WildRF, where the MLP more than DOUBLES false positives at
+matched recall (.1087 vs .0512 at TPR 0.98). On the unseen-generator tier it is
+a wash: mlp edges mean AUC (0.9637 vs 0.9620) while losing at the high-recall
+operating point anyone would actually deploy (FPR@TPR.99 .1225 vs .0875).
+
+This is UniversalFakeDetect (Ojha et al., CVPR 2023) reproduced on our own data:
+on frozen features, the linear probe transfers to unseen generators better than
+a trained deep classifier, and the deep classifier's in-distribution advantage
+inverts off-distribution. "Simplicity Prevails" (arXiv:2602.01738) reaches the
+same conclusion and uses a single linear layer.
+
+Mechanism: the backbone already did the representation learning. Head capacity
+past a linear boundary is spent fitting the seven TRAINING generators, and the
+deployment requirement is generalization to generators nobody has seen.
+
+**Do not revisit this by looking at val.** Any future head change must be judged
+on WildRF and the unseen-generator tier, at matched TPR. `mlp2` is kept in
+`heads.py` so the negative result stays reproducible.
+
+---
+
 ## 3. What was built
 
 ### Wave 1
