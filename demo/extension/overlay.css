@@ -1,0 +1,27 @@
+/* Overlay root: a single element appended directly to <html>, a sibling of
+   the page's own app root (e.g. Reddit/Instagram's React #root), never a
+   descendant of it -- so the site's own framework never has to reconcile
+   anything we add and never touches it. All positioning below is
+   document-relative (not viewport-relative), which is why this uses
+   position:absolute rather than position:fixed. */
+#__aigc_detect_overlay_root__ {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.__aigc_detect_badge__ {
+  position: absolute;
+  transform: translateY(-100%);
+  z-index: 2147483647;
+  pointer-events: none;
+  font: 600 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #111;
+  padding: 2px 7px;
+  border-radius: 4px 4px 4px 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  white-space: nowrap;
+}
