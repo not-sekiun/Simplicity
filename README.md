@@ -16,6 +16,10 @@ uv run python predict.py --input_dir path/to/images --output preds.json  # run s
 ]
 ```
 
+![results](#stats/charts/robustness_summary.png)
+
+demo_val is the validation dataset that includes COCO val2017 and DALL E advanced
+
 # Simplicity, AIGC Image Detection: TikTok TechJam 2026, Track 5
 
 Detecting AI-generated images after JPEG

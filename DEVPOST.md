@@ -1,9 +1,10 @@
 # Simplicity
 
-https://www.youtube.com/watch?v=gpclxXYXw2Y
-
 Simplicity is a modern AI image detection model that uses a linear classifier trained on the image embeddings of a vision foundation model
-to reliably detect AI images robustly across a range of adversarial transforms
+to reliably detect AI images robustly across a range of adversarial transforms. Training data was augmented using the stated transforms to improve
+in the wild robustness. All images were ran through the backbone model to obtain embeddings which the linear classifier was then trained on.
+
+For more information on installation, usage, and setup see the demo video: https://www.youtube.com/watch?v=gpclxXYXw2Y or the project page: https://github.com/not-sekiun/Simplicity
 
 Tools: VS Code, git, `uv` (dependency + venv management).
 
