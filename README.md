@@ -16,7 +16,7 @@ uv run python predict.py --input_dir path/to/images --output preds.json  # run s
 ]
 ```
 
-![results](stats/charts/robustness_summary.png)
+![results](stats/charts/07_robustness_summary.png)
 
 demo_val is the validation dataset that includes COCO val2017 and DALL E advanced
 
