@@ -1,0 +1,42 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Datasets, generated splits/manifests, cached embeddings. The data/ tree is
+# stubbed with .gitkeep so the layout is reproducible; `main.py check-env`
+# reports what is actually present. Nothing here is required to run predict.py.
+data/**
+# Re-include the DIRECTORIES first -- git will not descend into an excluded
+# directory, so a negation for a file inside one never fires without this.
+!data/**/
+!data/**/.gitkeep
+!data/quarantine/README.md
+
+# Regenerable evaluation outputs
+reports/error_analysis/**
+outputs/
+runs/
+wandb/
+
+# Credentials
+.env
+kaggle.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# The shipping checkpoint IS committed -- it is 19 KB (a 1,025-parameter linear
+# head; the frozen backbone is downloaded from HuggingFace, never stored) and
+# predict.py cannot run without it.
+!models/pe-core-l__linear__aigcmodern_nosd3_e1.pt
+
+# Presentation charts ARE committed (deliverable 5.5.4 visual summary).
+!stats/charts/*.png

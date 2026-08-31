@@ -1,0 +1,108 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>AIGC Live Detector</title>
+    <style>
+      body {
+        width: 260px;
+        font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        padding: 12px;
+        color: #111;
+      }
+      h1 {
+        font-size: 14px;
+        margin: 0 0 10px;
+      }
+      .row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin: 6px 0;
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 6px;
+      }
+      .ok {
+        background: #2ecc71;
+      }
+      .bad {
+        background: #e74c3c;
+      }
+      code {
+        font-size: 11px;
+        word-break: break-all;
+        color: #444;
+      }
+      input[type="text"] {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 4px 6px;
+        margin-top: 2px;
+      }
+      input[type="range"] {
+        width: 100%;
+      }
+      button {
+        margin-top: 8px;
+        width: 100%;
+        padding: 5px;
+      }
+      .hint {
+        color: #888;
+        margin-top: 10px;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>AIGC Live Detector</h1>
+
+    <div class="row">
+      <span><span id="dot" class="dot bad"></span>server</span>
+      <span id="status">checking...</span>
+    </div>
+    <div class="row"><span>backbone</span><span id="backbone">-</span></div>
+    <div class="row"><span>head</span><span id="head">-</span></div>
+
+    <div class="row" style="margin-top:10px"><span>flag threshold</span><span id="thresholdVal">0.50</span></div>
+    <input id="threshold" type="range" min="0.05" max="0.95" step="0.05" />
+
+    <div class="row" style="margin-top:10px"><span>min image size</span><span id="minSizeVal">150px</span></div>
+    <input id="minSize" type="range" min="50" max="400" step="10" />
+
+    <div class="row" style="margin-top:10px"><span>border thickness</span><span id="borderWidthVal">4px</span></div>
+    <input id="borderWidth" type="range" min="1" max="12" step="1" />
+
+    <div class="row" style="margin-top:10px"><span>tag size</span><span id="badgeScaleVal">100%</span></div>
+    <input id="badgeScale" type="range" min="0.5" max="2.5" step="0.1" />
+
+    <div class="row" style="margin-top:10px"><span>server URL</span></div>
+    <input id="serverUrl" type="text" />
+
+    <div class="row" style="margin-top:10px">
+      <span>debug mode (annotate everything)</span>
+      <input id="debugMode" type="checkbox" />
+    </div>
+
+    <button id="save">Save &amp; reload page</button>
+
+    <p class="hint">
+      Flags images with <code>P(AIGC) &gt;= threshold</code> that are at least <code>min image size</code> on
+      screen in both dimensions. Decorative/background images (marked as such by the page, or shaped like a
+      banner rather than a photo) are skipped regardless of size. Requires the local inference server running:
+      <code>uv run python demo/server.py</code>.
+    </p>
+    <p class="hint">
+      <strong>Debug mode</strong> shows a badge on every image/video actually scored, not just the ones over
+      threshold — green (confidently real) fading through yellow (at the threshold) to red (confidently AI), so
+      you can sanity-check the model on things it isn't flagging, not just the ones it is.
+    </p>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

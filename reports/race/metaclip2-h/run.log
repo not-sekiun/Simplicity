@@ -1,0 +1,188 @@
+
+======================================================================
+[race] metaclip2-h starting 2026-08-29T13:58:22.715930+00:00
+======================================================================
+
+[race] metaclip2-h: embedding train (sample_rows=6000, train_chains=True)
+[backbones] metaclip2-h: checkpoint=facebook/metaclip-2-worldwide-huge-quickgelu vision-tower params=630,766,080
+[embed-views] backbone=metaclip2-h native_res=224 pooled_dim=1280 norm_source=transformers AutoImageProcessor mean=(0.48145466, 0.4578275, 0.40821073) std=(0.26862954, 0.26130258, 0.27577711)
+[embed-views] --sample-rows 6000 (seed 42) -> 6000 rows, label counts {1: 3000, 0: 3000}, sources {'tiny_genimage': 6000}
+[embed-views] manifest=C:\Users\angus\Desktop\tiktoktechjam2026\data\processed\train.csv stem=train-s6000 rows=6000 views=22
+[embed-views] computing: clean, jpeg_q90, jpeg_q70, jpeg_q50, jpeg_q30, blur_sigma0.5, blur_sigma1.0, blur_sigma2.0, resize_0.5x, resize_0.25x, noise_sigma0.02, noise_sigma0.05, noise_sigma0.1, color_jitter, center_crop_80, chain_light, chain_medium, chain_heavy, trainchain_a, trainchain_b, trainchain_c, trainchain_d
+[embed-views] 132,000 forward passes from 6,000 decodes
+[embed-views] wrote 22 views x 6000 rows (399 MB) -> C:\Users\angus\Desktop\tiktoktechjam2026\data\embeddings
+
+[race] metaclip2-h: embedding val (sample_rows=2000, train_chains=False)
+[backbones] metaclip2-h: checkpoint=facebook/metaclip-2-worldwide-huge-quickgelu vision-tower params=630,766,080
+[embed-views] backbone=metaclip2-h native_res=224 pooled_dim=1280 norm_source=transformers AutoImageProcessor mean=(0.48145466, 0.4578275, 0.40821073) std=(0.26862954, 0.26130258, 0.27577711)
+[embed-views] --sample-rows 2000 (seed 42) -> 2000 rows, label counts {1: 1000, 0: 1000}, sources {'tiny_genimage': 2000}
+[embed-views] manifest=C:\Users\angus\Desktop\tiktoktechjam2026\data\processed\val.csv stem=val-s2000 rows=2000 views=18
+[embed-views] computing: clean, jpeg_q90, jpeg_q70, jpeg_q50, jpeg_q30, blur_sigma0.5, blur_sigma1.0, blur_sigma2.0, resize_0.5x, resize_0.25x, noise_sigma0.02, noise_sigma0.05, noise_sigma0.1, color_jitter, center_crop_80, chain_light, chain_medium, chain_heavy
+[embed-views] 36,000 forward passes from 2,000 decodes
+[embed-views] wrote 18 views x 2000 rows (109 MB) -> C:\Users\angus\Desktop\tiktoktechjam2026\data\embeddings
+
+[race] metaclip2-h: embedding ood (sample_rows=4000, train_chains=False)
+[backbones] metaclip2-h: checkpoint=facebook/metaclip-2-worldwide-huge-quickgelu vision-tower params=630,766,080
+[embed-views] backbone=metaclip2-h native_res=224 pooled_dim=1280 norm_source=transformers AutoImageProcessor mean=(0.48145466, 0.4578275, 0.40821073) std=(0.26862954, 0.26130258, 0.27577711)
+[embed-views] --sample-rows 4000 (seed 42) -> 4000 rows, label counts {1: 2000, 0: 2000}, sources {'aigc_detect_bench': 4000}
+[embed-views] manifest=C:\Users\angus\Desktop\tiktoktechjam2026\data\ood\ood.csv stem=ood-s4000 rows=4000 views=18
+[embed-views] computing: clean, jpeg_q90, jpeg_q70, jpeg_q50, jpeg_q30, blur_sigma0.5, blur_sigma1.0, blur_sigma2.0, resize_0.5x, resize_0.25x, noise_sigma0.02, noise_sigma0.05, noise_sigma0.1, color_jitter, center_crop_80, chain_light, chain_medium, chain_heavy
+[embed-views] 72,000 forward passes from 4,000 decodes
+[embed-views] wrote 18 views x 4000 rows (220 MB) -> C:\Users\angus\Desktop\tiktoktechjam2026\data\embeddings
+
+[race] metaclip2-h: training seeded head on clean + degraded + chained views
+[train-views] fingerprint OK: 11 train view(s) share manifest_fingerprint a48b47edc73b42a50c0264e53614b26d9e3b7d3c
+[train-views] fingerprint OK: 18 val view(s) share manifest_fingerprint f5ab6bb2f8244895283ee69829ee9747a287d8ae
+[train-views] backbone=metaclip2-h head=linear device=cuda
+[train-views] train stem=train-s6000 images=6000 views=11 -> 66,000 training rows
+[train-views] TRAINED views:  clean, jpeg_q70, blur_sigma1.0, resize_0.5x, noise_sigma0.05, color_jitter, center_crop_80, trainchain_a, trainchain_b, trainchain_c, trainchain_d
+[train-views] HELD-OUT views: blur_sigma0.5, blur_sigma2.0, chain_heavy, chain_light, chain_medium, jpeg_q30, jpeg_q50, jpeg_q90, noise_sigma0.02, noise_sigma0.1, resize_0.25x
+[train-views] validating on val-s2000 (18 cached views)
+[train-views] epoch 1/2  train_loss=0.1629  val AUC_clean=0.9944  AUC_robust(pooled)=0.9646  score=0.9795
+[train-views] epoch 2/2  train_loss=0.1047  val AUC_clean=0.9951  AUC_robust(pooled)=0.9633  score=0.9792
+[train-views] saved -> C:\Users\angus\Desktop\tiktoktechjam2026\models\metaclip2-h__linear__race.pt
+
+[race] metaclip2-h: scoring val
+[eval-grid] head=metaclip2-h__linear__race.pt kind=linear in_dim=1280
+[eval-grid] backbone=metaclip2-h manifest=val.csv cache_stem=val-s2000
+[eval-grid] fixed threshold 0.4717 (balanced-accuracy optimum on the clean view)
+[eval-grid] n=2000 rows, label counts {np.int64(0): np.int64(1000), np.int64(1): np.int64(1000)}
+
+view               kind        AUC   BAcc@t  BAcc@0.5     TPR     FPR
+---------------------------------------------------------------------
+clean              single   0.9951   0.9705    0.9680  0.9670  0.0260
+---------------------------------------------------------------------
+jpeg_q90           single   0.9980   0.9815    0.9820  0.9800  0.0170
+jpeg_q70           single   0.9993   0.9860    0.9855  0.9780  0.0060
+jpeg_q50           single   0.9981   0.9800    0.9795  0.9650  0.0050
+jpeg_q30           single   0.9969   0.9800    0.9785  0.9700  0.0100
+blur_sigma0.5      single   0.9902   0.9515    0.9525  0.9660  0.0630
+blur_sigma1.0      single   0.9880   0.9420    0.9395  0.9650  0.0810
+blur_sigma2.0      single   0.9231   0.7475    0.7565  0.9620  0.4670
+resize_0.5x        single   0.9822   0.9285    0.9315  0.9510  0.0940
+resize_0.25x       single   0.9399   0.8490    0.8530  0.9300  0.2320
+noise_sigma0.02    single   0.9563   0.8875    0.8880  0.9040  0.1290
+noise_sigma0.05    single   0.9196   0.8415    0.8415  0.8510  0.1680
+noise_sigma0.1     single   0.8414   0.7655    0.7675  0.8020  0.2710
+color_jitter       single   0.9909   0.9515    0.9550  0.9650  0.0620
+center_crop_80     single   0.9904   0.9465    0.9450  0.9310  0.0380
+---------------------------------------------------------------------
+chain_light        chain    0.9983   0.9765    0.9760  0.9680  0.0150
+chain_medium       chain    0.8706   0.6480    0.6450  0.3010  0.0050
+chain_heavy        chain    0.9881   0.9565    0.9580  0.9530  0.0400
+---------------------------------------------------------------------
+
+AUC_clean                       0.9951
+AUC_robust (pooled)             0.9633   ->  0.5*clean+0.5*robust = 0.9792
+AUC_robust (mean)               0.9630   ->  0.5*clean+0.5*robust = 0.9791
+AUC_robust (worst)              0.8414   ->  0.5*clean+0.5*robust = 0.9182   [worst view: noise_sigma0.1]
+
+robustness gap (AUC, clean - mean degraded)   0.0321
+robustness gap (BAcc@t, clean - mean degraded) 0.0694
+
+composition penalty (chain AUC - weakest component's AUC):
+  chain_light    0.9983  vs resize_0.5x      0.9822   penalty +0.0161
+  chain_medium   0.8706  vs resize_0.5x      0.9822   penalty -0.1115
+  chain_heavy    0.9881  vs noise_sigma0.05  0.9196   penalty +0.0685
+  Negative, growing with depth = composition costs more than any single part.
+  Positive = degradation is moving inputs TOWARD the training domain, so the
+  clean view is the outlier rather than the chains.
+
+mean AUC, single-transform views  0.9653
+mean AUC, chained views           0.9523   (delta -0.0130)
+Negative: composition costs more than any single axis -- the cliff a
+single-transform grid cannot see.
+
+per-generator AUC (that generator's fakes vs ALL reals):
+  generator          family     seen?        n    clean  degraded
+  --------------------------------------------------------------
+  ADM                diffusion  trained    146   0.9967    0.9626
+  BigGAN             gan        trained    164   0.9958    0.9569
+  GLIDE              diffusion  trained    167   0.9958    0.9623
+  Midjourney         diffusion  trained    137   0.9927    0.9560
+  SD15               diffusion  trained    125   0.9961    0.9618
+  VQDM               diffusion  trained    121   0.9916    0.9692
+  Wukong             diffusion  trained    140   0.9964    0.9760
+  --------------------------------------------------------------
+  MEAN diffusion                                 0.9949    0.9646  <- in scope
+  MEAN gan                                       0.9958    0.9569  <- out of scope, do not tune on this
+
+[eval-grid] per-view table -> C:\Users\angus\Desktop\tiktoktechjam2026\reports\race\metaclip2-h\grid_val.csv
+
+[race] metaclip2-h: scoring ood
+[eval-grid] head=metaclip2-h__linear__race.pt kind=linear in_dim=1280
+[eval-grid] backbone=metaclip2-h manifest=ood.csv cache_stem=ood-s4000
+[eval-grid] fixed threshold 0.7225 (balanced-accuracy optimum on the clean view)
+[eval-grid] n=4000 rows, label counts {np.int64(0): np.int64(2000), np.int64(1): np.int64(2000)}
+
+view               kind        AUC   BAcc@t  BAcc@0.5     TPR     FPR
+---------------------------------------------------------------------
+clean              single   0.9307   0.8875    0.8792  0.9230  0.1480
+---------------------------------------------------------------------
+jpeg_q90           single   0.9235   0.8385    0.8210  0.9625  0.2855
+jpeg_q70           single   0.9258   0.8347    0.8177  0.9675  0.2980
+jpeg_q50           single   0.9160   0.8573    0.8347  0.9650  0.2505
+jpeg_q30           single   0.8972   0.8387    0.8193  0.9375  0.2600
+blur_sigma0.5      single   0.9278   0.8885    0.8685  0.9200  0.1430
+blur_sigma1.0      single   0.9087   0.8627    0.8490  0.8825  0.1570
+blur_sigma2.0      single   0.8518   0.7598    0.7132  0.9180  0.3985
+resize_0.5x        single   0.8948   0.8488    0.8325  0.8790  0.1815
+resize_0.25x       single   0.8469   0.7913    0.7817  0.8170  0.2345
+noise_sigma0.02    single   0.8756   0.8168    0.8108  0.8060  0.1725
+noise_sigma0.05    single   0.8171   0.7360    0.7545  0.6510  0.1790
+noise_sigma0.1     single   0.7288   0.6525    0.6783  0.5205  0.2155
+color_jitter       single   0.9208   0.8735    0.8598  0.9185  0.1715
+center_crop_80     single   0.8993   0.8337    0.8393  0.8505  0.1830
+---------------------------------------------------------------------
+chain_light        chain    0.8842   0.7885    0.7808  0.9635  0.3865
+chain_medium       chain    0.8111   0.5685    0.6112  0.1970  0.0600
+chain_heavy        chain    0.7967   0.7472    0.7385  0.9380  0.4435
+---------------------------------------------------------------------
+
+AUC_clean                       0.9307
+AUC_robust (pooled)             0.8614   ->  0.5*clean+0.5*robust = 0.8961
+AUC_robust (mean)               0.8721   ->  0.5*clean+0.5*robust = 0.9014
+AUC_robust (worst)              0.7288   ->  0.5*clean+0.5*robust = 0.8298   [worst view: noise_sigma0.1]
+
+robustness gap (AUC, clean - mean degraded)   0.0586
+robustness gap (BAcc@t, clean - mean degraded) 0.0912
+
+composition penalty (chain AUC - weakest component's AUC):
+  chain_light    0.8842  vs resize_0.5x      0.8948   penalty -0.0106
+  chain_medium   0.8111  vs resize_0.5x      0.8948   penalty -0.0837
+  chain_heavy    0.7967  vs noise_sigma0.05  0.8171   penalty -0.0204
+  Negative, growing with depth = composition costs more than any single part.
+  Positive = degradation is moving inputs TOWARD the training domain, so the
+  clean view is the outlier rather than the chains.
+
+mean AUC, single-transform views  0.8810
+mean AUC, chained views           0.8307   (delta -0.0503)
+Negative: composition costs more than any single axis -- the cliff a
+single-transform grid cannot see.
+
+per-generator AUC (that generator's fakes vs ALL reals):
+  generator          family     seen?        n    clean  degraded
+  --------------------------------------------------------------
+  ADM                diffusion  trained    135   0.9115    0.8530
+  BigGAN             gan        trained    121   0.9418    0.8647
+  CycleGAN           gan        UNSEEN     135   0.9593    0.9042
+  DALLE2             diffusion  UNSEEN     151   0.8871    0.7954
+  GLIDE              diffusion  trained    114   0.9057    0.8267
+  GauGAN             gan        UNSEEN     124   0.9460    0.9043
+  Midjourney         diffusion  trained    132   0.9122    0.8400
+  ProGAN             gan        UNSEEN     102   0.9833    0.9207
+  SD14               diffusion  UNSEEN     117   0.9232    0.8501
+  SD15               diffusion  trained    121   0.9174    0.8546
+  SDXL               diffusion  UNSEEN     121   0.9415    0.8969
+  StarGAN            gan        UNSEEN     120   0.9538    0.8858
+  StyleGAN           gan        UNSEEN     134   0.9507    0.7949
+  StyleGAN2          gan        UNSEEN     128   0.9426    0.8821
+  VQDM               diffusion  trained    120   0.9035    0.8581
+  Wukong             diffusion  trained    125   0.9265    0.8775
+  --------------------------------------------------------------
+  MEAN diffusion                                 0.9143    0.8503  <- in scope
+  MEAN gan                                       0.9539    0.8795  <- out of scope, do not tune on this
+
+[eval-grid] per-view table -> C:\Users\angus\Desktop\tiktoktechjam2026\reports\race\metaclip2-h\grid_ood.csv
+
+[race] metaclip2-h DONE in 2439s

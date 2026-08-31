@@ -1,0 +1,161 @@
+
+======================================================================
+[race] pe-core-l starting 2026-08-29T13:58:04.539053+00:00
+======================================================================
+
+[race] pe-core-l: training seeded head on clean + degraded + chained views
+[train-views] fingerprint OK: 11 train view(s) share manifest_fingerprint a48b47edc73b42a50c0264e53614b26d9e3b7d3c
+[train-views] fingerprint OK: 18 val view(s) share manifest_fingerprint f5ab6bb2f8244895283ee69829ee9747a287d8ae
+[train-views] backbone=pe-core-l head=linear device=cuda
+[train-views] train stem=train-s6000 images=6000 views=11 -> 66,000 training rows
+[train-views] TRAINED views:  clean, jpeg_q70, blur_sigma1.0, resize_0.5x, noise_sigma0.05, color_jitter, center_crop_80, trainchain_a, trainchain_b, trainchain_c, trainchain_d
+[train-views] HELD-OUT views: blur_sigma0.5, blur_sigma2.0, chain_heavy, chain_light, chain_medium, jpeg_q30, jpeg_q50, jpeg_q90, noise_sigma0.02, noise_sigma0.1, resize_0.25x
+[train-views] validating on val-s2000 (18 cached views)
+[train-views] epoch 1/2  train_loss=0.1509  val AUC_clean=0.9980  AUC_robust(pooled)=0.9782  score=0.9881
+[train-views] epoch 2/2  train_loss=0.0856  val AUC_clean=0.9980  AUC_robust(pooled)=0.9791  score=0.9886
+[train-views] saved -> C:\Users\angus\Desktop\tiktoktechjam2026\models\pe-core-l__linear__race.pt
+
+[race] pe-core-l: scoring val
+[eval-grid] head=pe-core-l__linear__race.pt kind=linear in_dim=1024
+[eval-grid] backbone=pe-core-l manifest=val.csv cache_stem=val-s2000
+[eval-grid] fixed threshold 0.3752 (balanced-accuracy optimum on the clean view)
+[eval-grid] n=2000 rows, label counts {np.int64(0): np.int64(1000), np.int64(1): np.int64(1000)}
+
+view               kind        AUC   BAcc@t  BAcc@0.5     TPR     FPR
+---------------------------------------------------------------------
+clean              single   0.9980   0.9810    0.9750  0.9780  0.0160
+---------------------------------------------------------------------
+jpeg_q90           single   0.9986   0.9775    0.9705  0.9670  0.0120
+jpeg_q70           single   0.9988   0.9865    0.9840  0.9870  0.0140
+jpeg_q50           single   0.9966   0.9615    0.9505  0.9350  0.0120
+jpeg_q30           single   0.9916   0.9190    0.9030  0.8470  0.0090
+blur_sigma0.5      single   0.9968   0.9740    0.9740  0.9780  0.0300
+blur_sigma1.0      single   0.9921   0.9615    0.9635  0.9800  0.0570
+blur_sigma2.0      single   0.9620   0.8560    0.8770  0.9720  0.2600
+resize_0.5x        single   0.9911   0.9495    0.9555  0.9820  0.0830
+resize_0.25x       single   0.9509   0.8700    0.8820  0.9230  0.1830
+noise_sigma0.02    single   0.9772   0.9000    0.9175  0.9580  0.1580
+noise_sigma0.05    single   0.9587   0.8875    0.8955  0.9260  0.1510
+noise_sigma0.1     single   0.9152   0.8415    0.8405  0.9100  0.2270
+color_jitter       single   0.9967   0.9770    0.9720  0.9750  0.0210
+center_crop_80     single   0.9969   0.9740    0.9725  0.9620  0.0140
+---------------------------------------------------------------------
+chain_light        chain    0.9950   0.9635    0.9655  0.9780  0.0510
+chain_medium       chain    0.9553   0.8780    0.8545  0.8050  0.0490
+chain_heavy        chain    0.9121   0.8235    0.8335  0.8870  0.2400
+---------------------------------------------------------------------
+
+AUC_clean                       0.9980
+AUC_robust (pooled)             0.9791   ->  0.5*clean+0.5*robust = 0.9886
+AUC_robust (mean)               0.9756   ->  0.5*clean+0.5*robust = 0.9868
+AUC_robust (worst)              0.9121   ->  0.5*clean+0.5*robust = 0.9551   [worst view: chain_heavy]
+
+robustness gap (AUC, clean - mean degraded)   0.0224
+robustness gap (BAcc@t, clean - mean degraded) 0.0574
+
+composition penalty (chain AUC - weakest component's AUC):
+  chain_light    0.9950  vs resize_0.5x      0.9911   penalty +0.0039
+  chain_medium   0.9553  vs resize_0.5x      0.9911   penalty -0.0358
+  chain_heavy    0.9121  vs resize_0.25x     0.9509   penalty -0.0389
+  Negative, growing with depth = composition costs more than any single part.
+  Positive = degradation is moving inputs TOWARD the training domain, so the
+  clean view is the outlier rather than the chains.
+
+mean AUC, single-transform views  0.9802
+mean AUC, chained views           0.9541   (delta -0.0261)
+Negative: composition costs more than any single axis -- the cliff a
+single-transform grid cannot see.
+
+per-generator AUC (that generator's fakes vs ALL reals):
+  generator          family     seen?        n    clean  degraded
+  --------------------------------------------------------------
+  ADM                diffusion  trained    146   0.9953    0.9663
+  BigGAN             gan        trained    164   1.0000    0.9767
+  GLIDE              diffusion  trained    167   0.9993    0.9815
+  Midjourney         diffusion  trained    137   0.9924    0.9616
+  SD15               diffusion  trained    125   0.9999    0.9883
+  VQDM               diffusion  trained    121   0.9992    0.9890
+  Wukong             diffusion  trained    140   0.9999    0.9930
+  --------------------------------------------------------------
+  MEAN diffusion                                 0.9977    0.9799  <- in scope
+  MEAN gan                                       1.0000    0.9767  <- out of scope, do not tune on this
+
+[eval-grid] per-view table -> C:\Users\angus\Desktop\tiktoktechjam2026\reports\race\pe-core-l\grid_val.csv
+
+[race] pe-core-l: scoring ood
+[eval-grid] head=pe-core-l__linear__race.pt kind=linear in_dim=1024
+[eval-grid] backbone=pe-core-l manifest=ood.csv cache_stem=ood-s4000
+[eval-grid] fixed threshold 0.5139 (balanced-accuracy optimum on the clean view)
+[eval-grid] n=4000 rows, label counts {np.int64(0): np.int64(2000), np.int64(1): np.int64(2000)}
+
+view               kind        AUC   BAcc@t  BAcc@0.5     TPR     FPR
+---------------------------------------------------------------------
+clean              single   0.9532   0.9358    0.9352  0.9595  0.0880
+---------------------------------------------------------------------
+jpeg_q90           single   0.9446   0.9263    0.9263  0.9465  0.0940
+jpeg_q70           single   0.9393   0.9070    0.9065  0.9690  0.1550
+jpeg_q50           single   0.9328   0.9035    0.9038  0.9200  0.1130
+jpeg_q30           single   0.9223   0.8680    0.8693  0.8130  0.0770
+blur_sigma0.5      single   0.9526   0.9360    0.9358  0.9665  0.0945
+blur_sigma1.0      single   0.9344   0.9007    0.9007  0.9375  0.1360
+blur_sigma2.0      single   0.9105   0.8365    0.8353  0.9260  0.2530
+resize_0.5x        single   0.9350   0.8942    0.8912  0.9380  0.1495
+resize_0.25x       single   0.9027   0.8480    0.8475  0.8820  0.1860
+noise_sigma0.02    single   0.9038   0.8430    0.8413  0.9060  0.2200
+noise_sigma0.05    single   0.8858   0.8157    0.8177  0.8470  0.2155
+noise_sigma0.1     single   0.8480   0.7622    0.7618  0.8035  0.2790
+color_jitter       single   0.9496   0.9292    0.9297  0.9510  0.0925
+center_crop_80     single   0.9451   0.9243    0.9245  0.9425  0.0940
+---------------------------------------------------------------------
+chain_light        chain    0.9227   0.8715    0.8702  0.9500  0.2070
+chain_medium       chain    0.8828   0.8315    0.8307  0.8020  0.1390
+chain_heavy        chain    0.8099   0.7548    0.7545  0.8010  0.2915
+---------------------------------------------------------------------
+
+AUC_clean                       0.9532
+AUC_robust (pooled)             0.9200   ->  0.5*clean+0.5*robust = 0.9366
+AUC_robust (mean)               0.9131   ->  0.5*clean+0.5*robust = 0.9331
+AUC_robust (worst)              0.8099   ->  0.5*clean+0.5*robust = 0.8815   [worst view: chain_heavy]
+
+robustness gap (AUC, clean - mean degraded)   0.0401
+robustness gap (BAcc@t, clean - mean degraded) 0.0680
+
+composition penalty (chain AUC - weakest component's AUC):
+  chain_light    0.9227  vs resize_0.5x      0.9350   penalty -0.0122
+  chain_medium   0.8828  vs jpeg_q50         0.9328   penalty -0.0500
+  chain_heavy    0.8099  vs noise_sigma0.05  0.8858   penalty -0.0760
+  Negative, growing with depth = composition costs more than any single part.
+  Positive = degradation is moving inputs TOWARD the training domain, so the
+  clean view is the outlier rather than the chains.
+
+mean AUC, single-transform views  0.9219
+mean AUC, chained views           0.8718   (delta -0.0501)
+Negative: composition costs more than any single axis -- the cliff a
+single-transform grid cannot see.
+
+per-generator AUC (that generator's fakes vs ALL reals):
+  generator          family     seen?        n    clean  degraded
+  --------------------------------------------------------------
+  ADM                diffusion  trained    135   0.9208    0.8873
+  BigGAN             gan        trained    121   0.9722    0.9423
+  CycleGAN           gan        UNSEEN     135   0.9553    0.9380
+  DALLE2             diffusion  UNSEEN     151   0.9278    0.8020
+  GLIDE              diffusion  trained    114   0.9476    0.9163
+  GauGAN             gan        UNSEEN     124   0.9708    0.9591
+  Midjourney         diffusion  trained    132   0.9296    0.9094
+  ProGAN             gan        UNSEEN     102   0.9759    0.9578
+  SD14               diffusion  UNSEEN     117   0.9579    0.9448
+  SD15               diffusion  trained    121   0.9591    0.9399
+  SDXL               diffusion  UNSEEN     121   0.9554    0.9475
+  StarGAN            gan        UNSEEN     120   0.9602    0.9377
+  StyleGAN           gan        UNSEEN     134   0.9433    0.8575
+  StyleGAN2          gan        UNSEEN     128   0.9684    0.9373
+  VQDM               diffusion  trained    120   0.9598    0.9406
+  Wukong             diffusion  trained    125   0.9618    0.9457
+  --------------------------------------------------------------
+  MEAN diffusion                                 0.9466    0.9148  <- in scope
+  MEAN gan                                       0.9637    0.9328  <- out of scope, do not tune on this
+
+[eval-grid] per-view table -> C:\Users\angus\Desktop\tiktoktechjam2026\reports\race\pe-core-l\grid_ood.csv
+
+[race] pe-core-l DONE in 7s

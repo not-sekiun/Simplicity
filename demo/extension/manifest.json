@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "AIGC Live Detector (Demo)",
+  "version": "0.1.0",
+  "description": "Flags likely AI-generated images and video in real time while you browse, using a local aigc-detect inference server. Demo tool only, not a competition deliverable.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "http://127.0.0.1:8765/*",
+    "http://localhost:8765/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "css": ["overlay.css"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "AIGC Live Detector"
+  }
+}

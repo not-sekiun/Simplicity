@@ -1,0 +1,50 @@
+[project]
+name = "aigc-detect"
+version = "0.1.0"
+description = "Robust detection of AI-generated images under real-world transformations (TikTok TechJam 2026)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "numpy",
+    "pillow",
+    "pandas",
+    "scikit-learn",
+    "tqdm",
+    "pyyaml",
+    "kagglehub",
+    "datasets",
+    "huggingface-hub",
+    "timm>=1.0.29",
+    "transformers>=5.16.1",
+]
+
+# Not part of the graded deliverables -- backs the Chrome-extension live demo
+# only (demo/server.py). Kept out of the base dependency set on purpose so
+# `uv sync` for the actual submission stays lean. Install with
+# `uv sync --extra demo`.
+[project.optional-dependencies]
+demo = [
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
+    "requests>=2.32",
+]
+
+# Also not graded -- backs scripts/plot_stats.py, which renders the training
+# curves and evaluation charts under stats/. Kept out of the base set for the
+# same reason as `demo`. Install with `uv sync --extra viz`.
+viz = [
+    "matplotlib>=3.9",
+]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu130" }]
+torchvision = [{ index = "pytorch-cu130" }]
+torchaudio = [{ index = "pytorch-cu130" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
