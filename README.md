@@ -28,7 +28,8 @@ Detecting AI-generated images after JPEG
 re-encoding, resizing, blur, noise, colour shifts, and chains of all of those.
 
 A frozen 316M-parameter vision foundation model plus a **1,025-parameter linear
-probe**. The backbone is never fine-tuned.
+probe**. The linear probe is trained on outputs from the foundation model to classify AI images
+with data augmentation applied on the source data. The backbone is never fine-tuned.
 
 | tier | n | clean AUC | transformed (17-view mean) |
 |---|---|---|---|
