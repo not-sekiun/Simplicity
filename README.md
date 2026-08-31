@@ -130,62 +130,106 @@ it defaults to the shipping checkpoint.
 
 ## Steps to reproduce training
 
-Data lands in `data/` (gitignored; the tree is stubbed). `main.py check-env`
-reports what is actually present at any point.
+The commands below reproduce the default
+`pe-core-l__linear__allext_nodalle3_e1.pt` checkpoint from a clean checkout.
+Data lands in `data/` (gitignored; the tree is stubbed), and `main.py check-env`
+reports what is present at any point.
+
+WildRF must be downloaded from its
+[official repository](https://github.com/barcavia/RealTime-DeepfakeDetection-in-the-RealWorld)
+and extracted to `data/real_ext/WildRF/` before step 2.
 
 ```bash
-# 1. Training data + splits
+# 1. Build the base split first. Do this before downloading SID_Set so its
+#    AIGC half cannot enter train.csv or val.csv.
 uv run main.py download tiny-genimage --limit-per-split 40000
 uv run main.py split --val-fraction 0.15 --seed 42
-uv run python scripts/download_real_domains.py --merge          # real-image domains
+
+# 2. Add the separate training-only manifests used by the shipping head.
+uv run main.py download sid-set --limit-per-class 4000
+uv run python scripts/make_sid_real.py
+
+uv run python scripts/download_real_domains.py --source unsplash --limit 4000
+uv run python scripts/download_real_domains.py --merge
+
 uv run python scripts/download_aigc_modern.py --source midjourney-v6 --limit 1500
-uv run python scripts/download_aigc_modern.py --source nano-banana  --limit 1500
+uv run python scripts/download_aigc_modern.py --source nano-banana --limit 1500
 
-# 2. Evaluation tiers (never trained on — `split` cannot glob them)
-uv run main.py download-demo coco-val2017 && uv run main.py build-demo-val
-uv run main.py download-ood --per-generator 250 && uv run main.py build-ood
+# Build WildRF's disjoint train-real and test manifests.
 uv run python scripts/make_wildrf.py
-uv run python scripts/download_aigc_modern.py --source dalle3-holdout --limit 1500
 
-# 3. Audit the data BEFORE training (blind-probe shortcut canary)
+# Pull the disjoint generator-diverse slice used by train-ext. The first 8,400
+# stream rows are skipped because they were reserved for the OOD evaluation tier.
+uv run python -c "import sys; sys.path.insert(0, 'src'); from aigc_detect.config import DATA_DIR, GENERATOR_FAMILY, TRAIN_GENERATORS; from scripts.download_ood_benchmark import download_ood_benchmark; gens=tuple(sorted(g for g, family in GENERATOR_FAMILY.items() if g not in TRAIN_GENERATORS and family != 'real')); out=DATA_DIR/'train_ext'; download_ood_benchmark(per_generator=400, max_scan=60000, min_scan=0, skip_rows=8400, out_dir=out, index_path=out/'train_ext_index.csv', source_name='aigc_bench_ext', only_generators=gens+('Real',))"
+uv run python scripts/make_train_ext.py
+
+# 3. Audit the data before training (blind-probe shortcut canary).
 uv run main.py audit-data --transform
 
-# 4. Cache embeddings — one decode per image, all views
-uv run main.py embed-views --backbone pe-core-l --manifest train-ext
+# 4. Cache clean plus six single-transform views and four training-only chains
+#    for every training manifest. Validation uses all 18 scored views.
+for manifest in train-ext sid-real unsplash-real wildrf-real nano-banana midjourney-v6; do
+  uv run main.py embed-views --backbone pe-core-l --manifest "$manifest" \
+    --views clean jpeg_q70 blur_sigma1.0 resize_0.5x noise_sigma0.05 \
+            color_jitter center_crop_80 trainchain_a trainchain_b \
+            trainchain_c trainchain_d
+done
 uv run main.py embed-views --backbone pe-core-l --manifest val --sample-rows 2000
-#   ...repeat per manifest; see `main.py embed-views --help`
 
-# 5. Train the shipping head (seconds, on cached embeddings)
-uv run main.py train-head-views --backbone pe-core-l --all-severities \
+# 5. Train the shipping head (seconds once embeddings are cached).
+uv run main.py train-head-views --backbone pe-core-l --with-chains \
   --val-sample-rows 2000 --train-manifest train-ext \
-  --extra-train-manifest sid-real unsplash-real nano-banana midjourney-v6 \
-  --balance --epochs 1 --out models/pe-core-l__linear__allsev_e1.pt
-
-# 6. Evaluate
-uv run main.py eval-grid --backbone pe-core-l --manifest ood --sample-rows 4000 \
-  --head models/pe-core-l__linear__allsev_e1.pt --by-generator
-uv run main.py error-analysis --backbone pe-core-l --manifest ood --sample-rows 4000 \
-  --head models/pe-core-l__linear__allsev_e1.pt
+  --extra-train-manifest sid-real unsplash-real wildrf-real nano-banana midjourney-v6 \
+  --balance --epochs 1 \
+  --out models/pe-core-l__linear__allext_nodalle3_e1.pt
 ```
 
-**`--epochs 1` is deliberate, and validation will not tell you why.** On this
-recipe epoch 2 slightly *raises* val AUC_robust (0.9832 → 0.9838). Every held-out
-tier disagrees: DALL·E 3 recall 0.958 → 0.942, OOD 17-view recall 0.714 → 0.671.
-There is no best-epoch selection in the trainer, so the epoch count is the whole
-control. The curve is `stats/charts/02_validation_auc.png`.
+The evaluation corpora are deliberately outside `data/raw/`, so `split` cannot
+include them in training. Build and embed a tier before evaluating it:
 
-**`--all-severities` selects the 19 training views in a fixed order; the rows are 
-concatenated view by view, so a different order is a different shuffle and different 
-final weights.
+```bash
+# OOD benchmark
+uv run main.py download-ood --per-generator 250
+uv run main.py build-ood
+uv run main.py embed-views --backbone pe-core-l --manifest ood --sample-rows 4000
+uv run main.py eval-grid --backbone pe-core-l --manifest ood --sample-rows 4000 \
+  --head models/pe-core-l__linear__allext_nodalle3_e1.pt --by-generator
+uv run main.py error-analysis --backbone pe-core-l --manifest ood --sample-rows 4000 \
+  --head models/pe-core-l__linear__allext_nodalle3_e1.pt
+
+# Modern-generator holdout
+uv run python scripts/download_aigc_modern.py --source dalle3-holdout --limit 1500
+uv run main.py embed-views --backbone pe-core-l --manifest dalle3-holdout
+uv run main.py eval-grid --backbone pe-core-l --manifest dalle3-holdout \
+  --head models/pe-core-l__linear__allext_nodalle3_e1.pt --by-generator
+```
+
+The challenge's COCO/DALL·E Advanced demonstration set requires a manual
+WildFake download before it can be indexed; see
+`scripts/download_demo_val.py`. It is not used to train the shipping checkpoint.
+
+**`--epochs 1` is deliberate.** The trainer saves its final epoch rather than
+selecting the best checkpoint. In the closest controlled `allsev` ablation,
+epoch 2 slightly raises val AUC_robust (0.9832 → 0.9838), while DALL·E 3 recall
+falls 0.958 → 0.942 and OOD 17-view recall falls 0.714 → 0.671. The curve is
+`stats/charts/02_validation_auc.png`.
+
+**`--with-chains` selects the checkpoint's 11 training views in a fixed order.**
+The rows are concatenated view by view, so a different order is a different
+shuffle and produces different final weights. DALL·E 3 is intentionally absent
+from all training manifests and remains a modern-generator holdout.
 
 Regenerate the charts and stats tables:
 
 ```bash
 uv sync --extra viz
-uv run python scripts/train_instrumented.py    # training curves
 uv run python scripts/export_eval_stats.py     # evaluation tables
 uv run python scripts/plot_stats.py            # → stats/charts/*.png
 ```
+
+`scripts/train_instrumented.py` regenerates the separate two-epoch `allsev`
+ablation behind the training-curve chart. It requires all 19 training-view
+caches and is not part of reproducing the default checkpoint above.
 
 Every number in this README traces to a CSV in [`stats/`](stats/README.md).
 
@@ -227,3 +271,4 @@ models/                    The shipping checkpoint (19 KB)
 stats/                     Presentation CSVs + charts — see stats/README.md
 reports/                   Robustness grids, backbone race, data audit log
 data/                      Stubbed; gitignored. `main.py check-env` reports state
+```
