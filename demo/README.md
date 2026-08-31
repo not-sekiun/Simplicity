@@ -39,7 +39,7 @@ uv sync --extra demo
 # 2. Start the inference server (loads the backbone once, then serves)
 uv run python demo/server.py
 # ... or point it at a specific checkpoint:
-uv run python demo/server.py --head models/pe-core-l__linear__trainext.pt
+uv run python demo/server.py --head models/pe-core-l__linear__allext_nodalle3_e1.pt
 ```
 
 Wait for `Uvicorn running on http://127.0.0.1:8765` — the backbone download/
@@ -47,7 +47,7 @@ load takes a bit on first run. Verify it's up:
 
 ```bash
 curl http://127.0.0.1:8765/health
-# {"ready":true,"backbone":"pe-core-l","head":"pe-core-l__linear__trainext.pt"}
+# {"ready":true,"backbone":"pe-core-l","head":"pe-core-l__linear__allext_nodalle3_e1.pt"}
 ```
 
 ### Load the extension

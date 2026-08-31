@@ -128,6 +128,56 @@ it defaults to the shipping checkpoint.
 
 ---
 
+## Optional live browser demo setup (out of scope)
+
+> **This bonus Chrome-extension demo is not part of the hackathon deliverables.**
+> Judges only need the model setup and directory inference instructions above.
+> The demo has its own optional dependencies and does not replace
+> `predict.py`.
+
+Complete the normal model setup first. Then install the separate demo extra:
+
+```bash
+uv sync --extra demo
+```
+
+Start the loopback-only inference server. The default command uses the same
+shipping checkpoint as `predict.py`:
+
+```bash
+uv run python demo/server.py
+```
+
+Wait for `Uvicorn running on http://127.0.0.1:8765`, then verify it in another
+terminal:
+
+```bash
+curl http://127.0.0.1:8765/health
+# {"ready":true,"backbone":"pe-core-l","head":"pe-core-l__linear__allext_nodalle3_e1.pt"}
+```
+
+If startup reports that port `8765` is already in use, check `/health`: another
+demo-server instance may already be running. Stop that instance before starting
+the current checkpoint; the bundled extension is permissioned for port `8765`.
+
+Load the extension in Chrome:
+
+1. Open `chrome://extensions`.
+2. Enable **Developer mode**.
+3. Select **Load unpacked** and choose `demo/extension/`.
+4. Open the extension popup and confirm that its status is **ready** and the
+   displayed head is `pe-core-l__linear__allext_nodalle3_e1.pt`.
+5. Browse a page containing ordinary `<img>` elements. The extension sends
+   visible images to the local server and outlines those above its selected
+   threshold. Use debug mode to display scores below the threshold too.
+
+The popup defaults to a deliberately sensitive `0.50` demonstration threshold;
+`0.95` is its closest slider setting to the shipping model's calibrated
+`0.955` threshold. Detailed architecture, configuration, video behavior, and
+limitations are documented in [`demo/README.md`](demo/README.md).
+
+---
+
 ## Steps to reproduce training
 
 The commands below reproduce the default
