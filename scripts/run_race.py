@@ -83,7 +83,7 @@ def _load_status() -> dict:
     if STATUS_JSON.exists():
         try:
             return json.loads(STATUS_JSON.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception:  # a corrupt status file must not kill the race
             pass
     return {"started": datetime.now(UTC).isoformat(), "backbones": {}}
 
@@ -187,7 +187,7 @@ def main():
     for key in a.backbones:
         try:
             run_backbone(key, status, skip_embed=a.skip_embed)
-        except Exception:
+        except Exception:  # one backbone failing must not abort the race
             status["backbones"].setdefault(key, {})["status"] = "FAILED"
             status["backbones"][key]["error"] = traceback.format_exc()[-4000:]
             _save_status(status)

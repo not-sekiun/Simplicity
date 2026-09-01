@@ -217,7 +217,7 @@ def stratified_sample(df: pd.DataFrame, n: int, seed: int = RANDOM_SEED) -> pd.D
                 break
             alloc[int(np.argmax(np.where(room > 0, sizes, -1.0)))] += 1
 
-        for (_src, g), k in zip(groups, alloc, strict=False):
+        for (_src, g), k in zip(groups, alloc, strict=True):
             if k > 0:
                 picked = np.sort(rng.choice(len(g), size=int(k), replace=False))
                 parts.append(g.iloc[picked])

@@ -306,7 +306,7 @@ def train_head_on_views(
         drop = {g.strip().lower() for g in exclude_generators}
         stems = [(train_stem, train_manifest, train_sample_rows),
                  *[(st, mf, None) for st, mf in extra_train]]
-        for (stem, manifest, sample_rows), arrays in zip(stems, all_sets, strict=False):
+        for (stem, manifest, sample_rows), arrays in zip(stems, all_sets, strict=True):
             if manifest is None:
                 raise SystemExit(
                     f"[train-views] --exclude-generators needs the manifest for stem '{stem}' "
@@ -473,8 +473,8 @@ def train_head(
         f"[train-head] backbone={backbone_key} head={head_kind} in_dim={in_dim} "
         f"train_n={len(train_emb)} val_n={len(val_emb)} device={device}"
     )
-    print(f"[train-head] train label counts: {dict(zip(*np.unique(train_labels, return_counts=True), strict=False))}")
-    print(f"[train-head] val label counts:   {dict(zip(*np.unique(val_labels, return_counts=True), strict=False))}")
+    print(f"[train-head] train label counts: {dict(zip(*np.unique(train_labels, return_counts=True), strict=True))}")
+    print(f"[train-head] val label counts:   {dict(zip(*np.unique(val_labels, return_counts=True), strict=True))}")
 
     train_ds = TensorDataset(torch.from_numpy(train_emb_s), torch.from_numpy(train_labels.astype(np.float32)))
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
