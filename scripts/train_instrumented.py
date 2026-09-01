@@ -220,7 +220,7 @@ def main() -> None:
         "train_views": list(TRAIN_VIEWS), "epochs": a.epochs, "lr": a.lr,
         "batch_size": a.batch_size, "weight_decay": a.weight_decay, "seed": a.seed,
         "balance_pos_weight": round(float(pos_weight.item()), 6),
-        "n_images": int(n_images), "n_rows": int(len(x)),
+        "n_images": int(n_images), "n_rows": len(x),
         "n_real_rows": int(n_neg), "n_aigc_rows": int(n_pos),
         "steps_per_epoch": len(loader), "eval_every": a.eval_every,
         "note": "Instrumented replica for presentation stats. NOT a ship candidate.",

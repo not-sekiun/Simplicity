@@ -186,7 +186,7 @@ def main() -> None:
                       "n": int(m.sum())})
     pf, _ = probs(h, mean, std, "dalle3_holdout", "clean")
     grows.append({"generator": "DALLE3 (held out)", "family": "diffusion", "era": 2023,
-                  "recall": round(float((pf >= SHIP_THR).mean()), 6), "n": int(len(pf))})
+                  "recall": round(float((pf >= SHIP_THR).mean()), 6), "n": len(pf)})
     pd.DataFrame(grows).to_csv(STATS_DIR / "generator_recall.csv", index=False)
 
     # 4. per-platform false positives on real photographs ---------------------

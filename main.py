@@ -122,29 +122,29 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from aigc_detect.config import (  # noqa: E402
-    PEXELS_REAL_MANIFEST,
-    PHOTO_REAL_MANIFEST,
-    SID_REAL_MANIFEST,
-    TRAIN_EXT_MANIFEST,
-    NANO_BANANA_MANIFEST,
-    MIDJOURNEY_V6_MANIFEST,
-    DALLE3_HOLDOUT_MANIFEST,
     AIGC_MODERN_MANIFEST,
-    UNSPLASH_REAL_MANIFEST,
-    WILDRF_REAL_MANIFEST,
-    WILDRF_TEST_MANIFEST,
-    OOD_MANIFEST,
-    ROOT_DIR,
+    DALLE3_HOLDOUT_MANIFEST,
     DEMO_VAL_DIR,
     DEMO_VAL_MANIFEST,
     HELDOUT_DIR,
     HELDOUT_MANIFEST,
+    MIDJOURNEY_V6_MANIFEST,
+    NANO_BANANA_MANIFEST,
+    OOD_MANIFEST,
+    PEXELS_REAL_MANIFEST,
+    PHOTO_REAL_MANIFEST,
     PROCESSED_DIR,
     RANDOM_SEED,
     RAW_DIR,
+    ROOT_DIR,
+    SID_REAL_MANIFEST,
+    TRAIN_EXT_MANIFEST,
     TRAIN_MANIFEST,
+    UNSPLASH_REAL_MANIFEST,
     VAL_FRACTION,
     VAL_MANIFEST,
+    WILDRF_REAL_MANIFEST,
+    WILDRF_TEST_MANIFEST,
 )
 
 
@@ -205,7 +205,13 @@ def cmd_download(args):
 
 
 def cmd_split(args):
-    from scripts.make_splits import cap_per_source, filter_sources, holdout_generators, load_indexes, stratified_split
+    from scripts.make_splits import (
+        cap_per_source,
+        filter_sources,
+        holdout_generators,
+        load_indexes,
+        stratified_split,
+    )
 
     df = load_indexes()
     print(f"[split] loaded {len(df)} indexed images across sources: {df['source'].value_counts().to_dict()}")
@@ -269,10 +275,11 @@ def cmd_audit_data(args):
 
 
 def cmd_preview_augment(args):
+    import torchvision.transforms.v2.functional as F
+    from PIL import Image
+
     from aigc_detect.dataset import ManifestImageDataset
     from aigc_detect.transforms import build_train_transform
-    from PIL import Image
-    import torchvision.transforms.v2.functional as F
 
     if not TRAIN_MANIFEST.exists():
         print(f"No train manifest at {TRAIN_MANIFEST}. Run `main.py download ...` then `main.py split` first.")

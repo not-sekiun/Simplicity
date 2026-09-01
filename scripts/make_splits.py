@@ -38,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-from aigc_detect.config import LABEL_AIGC, LABEL_REAL, PROCESSED_DIR, RAW_DIR, RANDOM_SEED, VAL_FRACTION
+from aigc_detect.config import LABEL_AIGC, LABEL_REAL, PROCESSED_DIR, RANDOM_SEED, RAW_DIR, VAL_FRACTION
 
 # Backfill for sources indexed before the `generator` column existed.
 _GENERATOR_BACKFILL = {

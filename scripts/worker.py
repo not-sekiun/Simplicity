@@ -120,8 +120,8 @@ def run_job(job: str) -> None:
         _run(["uv", "run", "main.py", "download", "tiny-genimage"])
         _run(["uv", "run", "main.py", "build-heldout"])
     elif job in ("data:ood", "data:train-ext"):
-        from scripts.download_ood_benchmark import download_ood_benchmark
         from aigc_detect.config import GENERATOR_FAMILY, TRAIN_GENERATORS
+        from scripts.download_ood_benchmark import download_ood_benchmark
 
         if job == "data:ood":
             download_ood_benchmark(**OOD_PULL)

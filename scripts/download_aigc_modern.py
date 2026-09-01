@@ -132,8 +132,8 @@ def merge() -> Path:
 
 
 def main() -> Path:
-    from PIL import Image
     from datasets import load_dataset
+    from PIL import Image
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--source", choices=sorted(SOURCES))

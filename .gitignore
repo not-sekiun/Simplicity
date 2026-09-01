@@ -62,3 +62,6 @@ data/train_ext/**
 
 # Voice memos / scratch audio (kept locally, never committed)
 *.mp3
+
+# Refactor baseline captures (regenerable, local only)
+.refactor_baseline/

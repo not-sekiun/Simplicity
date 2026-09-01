@@ -39,7 +39,7 @@ import json
 import sys
 import time
 import traceback
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -88,12 +88,12 @@ def _load_status() -> dict:
             return json.loads(STATUS_JSON.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001 - a corrupt status file must not kill the race
             pass
-    return {"started": datetime.now(timezone.utc).isoformat(), "backbones": {}}
+    return {"started": datetime.now(UTC).isoformat(), "backbones": {}}
 
 
 def _save_status(status: dict) -> None:
     RACE_DIR.mkdir(parents=True, exist_ok=True)
-    status["updated"] = datetime.now(timezone.utc).isoformat()
+    status["updated"] = datetime.now(UTC).isoformat()
     STATUS_JSON.write_text(json.dumps(status, indent=2, default=str), encoding="utf-8")
 
 
@@ -111,7 +111,7 @@ def run_backbone(key: str, status: dict, skip_embed: bool = False) -> None:
     with open(log_path, "a", encoding="utf-8") as log_fh:
         tee = _Tee(sys.__stdout__, log_fh)
         with contextlib.redirect_stdout(tee):
-            print(f"\n{'=' * 70}\n[race] {key} starting {datetime.now(timezone.utc).isoformat()}\n{'=' * 70}")
+            print(f"\n{'=' * 70}\n[race] {key} starting {datetime.now(UTC).isoformat()}\n{'=' * 70}")
 
             if not skip_embed:
                 for tag, (manifest, rows, chains) in {
@@ -196,7 +196,7 @@ def main():
             _save_status(status)
             print(f"\n[race] {key} FAILED -- continuing with the rest\n{traceback.format_exc()}")
 
-    status["finished"] = datetime.now(timezone.utc).isoformat()
+    status["finished"] = datetime.now(UTC).isoformat()
     _save_status(status)
     print(f"\n[race] all done -> {STATUS_JSON}")
 

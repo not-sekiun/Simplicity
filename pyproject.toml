@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "aigc-detect"
 version = "0.1.0"
@@ -38,6 +42,50 @@ demo = [
 viz = [
     "matplotlib>=3.9",
 ]
+
+# The package lives under src/. Declaring it here is what makes
+# `import aigc_detect` work from anywhere -- before this, every script and both
+# entry points opened with a `sys.path.insert(0, .../src)` preamble (23 files).
+[tool.hatch.build.targets.wheel]
+packages = ["src/aigc_detect"]
+
+# `aigc <command>` is the real entry point. main.py at the repo root is kept as
+# a thin shim so the documented `uv run main.py ...` invocations keep working.
+[project.scripts]
+aigc = "aigc_detect.cli:main"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16",
+    "pytest>=8.3",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+src = ["src", "scripts", "tests"]
+extend-exclude = [".venv", "data", "models", "reports", "docs", ".refactor_baseline"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "I",    # import sorting
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "A",    # shadowing builtins
+    "SIM",  # simplification
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "E501",    # line length is handled by the formatter, not the linter
+    "B008",    # function call in default arg -- argparse patterns rely on it
+    "SIM108",  # ternaries are not always clearer than if/else here
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu130" }]
