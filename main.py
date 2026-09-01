@@ -126,6 +126,10 @@ from aigc_detect.config import (  # noqa: E402
     PHOTO_REAL_MANIFEST,
     SID_REAL_MANIFEST,
     TRAIN_EXT_MANIFEST,
+    NANO_BANANA_MANIFEST,
+    MIDJOURNEY_V6_MANIFEST,
+    DALLE3_HOLDOUT_MANIFEST,
+    AIGC_MODERN_MANIFEST,
     UNSPLASH_REAL_MANIFEST,
     WILDRF_REAL_MANIFEST,
     WILDRF_TEST_MANIFEST,
@@ -304,26 +308,38 @@ def cmd_list_backbones(_args):
         )
 
 
+# Single source of truth for --manifest. Four argparse choices lists used to
+# carry their own hardcoded copy of these names, and they drifted the moment new
+# corpora were added: _resolve_manifest knew about them, embed-views did not, so
+# a valid manifest was rejected at the CLI boundary with a confusing error.
+MANIFESTS = {
+    "train": TRAIN_MANIFEST,
+    "train-ext": TRAIN_EXT_MANIFEST,
+    "sid-real": SID_REAL_MANIFEST,
+    "photo-real": PHOTO_REAL_MANIFEST,
+    "unsplash-real": UNSPLASH_REAL_MANIFEST,
+    "pexels-real": PEXELS_REAL_MANIFEST,
+    "wildrf-real": WILDRF_REAL_MANIFEST,
+    "wildrf-test": WILDRF_TEST_MANIFEST,
+    "nano-banana": NANO_BANANA_MANIFEST,
+    "midjourney-v6": MIDJOURNEY_V6_MANIFEST,
+    "dalle3-holdout": DALLE3_HOLDOUT_MANIFEST,
+    "aigc-modern": AIGC_MODERN_MANIFEST,
+    "val": VAL_MANIFEST,
+    "heldout": HELDOUT_MANIFEST,
+    "demo-val": DEMO_VAL_MANIFEST,
+    "ood": OOD_MANIFEST,
+}
+MANIFEST_CHOICES = list(MANIFESTS)
+
+
 def _resolve_manifest(name: str):
     """Map a --manifest choice to its path, exiting with a hint if it's missing.
 
     demo-val is embeddable for EVALUATION ONLY (brief 5.4 forbids training on
     it). train_head never looks at it -- it hardcodes TRAIN_MANIFEST/VAL_MANIFEST.
     """
-    manifests = {
-        "train": TRAIN_MANIFEST,
-        "train-ext": TRAIN_EXT_MANIFEST,
-        "sid-real": SID_REAL_MANIFEST,
-        "photo-real": PHOTO_REAL_MANIFEST,
-        "unsplash-real": UNSPLASH_REAL_MANIFEST,
-        "pexels-real": PEXELS_REAL_MANIFEST,
-        "wildrf-real": WILDRF_REAL_MANIFEST,
-        "wildrf-test": WILDRF_TEST_MANIFEST,
-        "val": VAL_MANIFEST,
-        "heldout": HELDOUT_MANIFEST,
-        "demo-val": DEMO_VAL_MANIFEST,
-        "ood": OOD_MANIFEST,
-    }
+    manifests = MANIFESTS
     manifest = manifests[name]
     if not manifest.exists():
         hint = {"demo-val": "build-demo-val", "heldout": "build-heldout",
@@ -332,7 +348,11 @@ def _resolve_manifest(name: str):
                 "sid-real": "python scripts/make_sid_real.py",
                 "photo-real": "python scripts/download_real_domains.py --merge",
                 "wildrf-real": "python scripts/make_wildrf.py",
-                "wildrf-test": "python scripts/make_wildrf.py"}.get(name, "split")
+                "wildrf-test": "python scripts/make_wildrf.py",
+                "nano-banana": "python scripts/download_aigc_modern.py --source nano-banana",
+                "midjourney-v6": "python scripts/download_aigc_modern.py --source midjourney-v6",
+                "dalle3-holdout": "python scripts/download_aigc_modern.py --source dalle3-holdout",
+                "aigc-modern": "python scripts/download_aigc_modern.py --merge"}.get(name, "split")
         print(f"No {name} manifest at {manifest}. Run `main.py {hint}` first.")
         sys.exit(1)
     return manifest
@@ -374,7 +394,12 @@ def cmd_embed_views(args):
 
 def cmd_train_head_views(args):
     from aigc_detect.embed_views import cache_stem
-    from aigc_detect.train_head import TRAIN_VIEWS_DEFAULT, TRAIN_VIEWS_WITH_CHAINS, train_head_on_views
+    from aigc_detect.train_head import (
+        TRAIN_VIEWS_ALL_SEVERITIES,
+        TRAIN_VIEWS_DEFAULT,
+        TRAIN_VIEWS_WITH_CHAINS,
+        train_head_on_views,
+    )
 
     train_manifest = TRAIN_EXT_MANIFEST if args.train_manifest == 'train-ext' else TRAIN_MANIFEST
     train_stem = cache_stem(train_manifest, sample_rows=args.train_sample_rows)
@@ -390,6 +415,10 @@ def cmd_train_head_views(args):
     views = tuple(args.train_views) if args.train_views else TRAIN_VIEWS_DEFAULT
     if args.with_chains:
         views = TRAIN_VIEWS_WITH_CHAINS
+    if args.all_severities:
+        # Checked after --with-chains because it is a superset of it: the ship
+        # recipe is "every severity AND the training chains".
+        views = TRAIN_VIEWS_ALL_SEVERITIES
     if args.clean_only:
         views = ("clean",)
 
@@ -411,6 +440,7 @@ def cmd_train_head_views(args):
         seed=args.seed,
         extra_train=extra,
         balance_classes=args.balance,
+        exclude_generators=args.exclude_generators or (),
     )
 
 
@@ -485,7 +515,7 @@ def cmd_error_analysis(args):
 def cmd_predict(args):
     from aigc_detect.predict import run_inference
 
-    head_path = Path(args.head) if args.head else ROOT_DIR / "models" / "pe-core-l__linear__trainext.pt"
+    head_path = Path(args.head) if args.head else ROOT_DIR / "models" / "pe-core-l__linear__allsev_e1.pt"
     if not head_path.exists():
         print(f"No head checkpoint at {head_path}. Pass --head <path> or train one first.")
         sys.exit(1)
@@ -592,7 +622,7 @@ def build_parser() -> argparse.ArgumentParser:
         "embed", help='Precompute + cache pooled embeddings for a manifest under data/embeddings/.'
     )
     p_embed.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
-    p_embed.add_argument("--manifest", required=True, choices=["train", "train-ext", "sid-real", "photo-real", "unsplash-real", "pexels-real", "wildrf-real", "val", "heldout", "demo-val", "ood", "wildrf-test"])
+    p_embed.add_argument("--manifest", required=True, choices=MANIFEST_CHOICES)
     p_embed.add_argument("--batch-size", type=int, default=64)
     p_embed.add_argument("--num-workers", type=int, default=4)
     p_embed.add_argument("--force", action="store_true", help="Recompute even if the cached .npz already exists.")
@@ -606,7 +636,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Precompute cached embeddings for every robustness view (5.2 table) of a manifest.",
     )
     p_embed_views.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
-    p_embed_views.add_argument("--manifest", required=True, choices=["train", "train-ext", "sid-real", "photo-real", "unsplash-real", "pexels-real", "wildrf-real", "val", "heldout", "demo-val", "ood", "wildrf-test"])
+    p_embed_views.add_argument("--manifest", required=True, choices=MANIFEST_CHOICES)
     p_embed_views.add_argument(
         "--views", nargs="+", default=None, metavar="VIEW",
         help="Only compute these views (default: all 18). E.g. --views clean blur_sigma2.0 chain_heavy",
@@ -650,11 +680,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_thv.add_argument("--train-manifest", default="train", choices=["train", "train-ext"],
                        help="Which training manifest to read cached views for (default: train).")
     p_thv.add_argument("--extra-train-manifest", nargs="+", default=None, metavar="NAME",
-                       choices=["train-ext", "sid-real", "photo-real", "unsplash-real", "pexels-real", "wildrf-real"],
+                       choices=["train-ext", "sid-real", "photo-real", "unsplash-real", "pexels-real", "wildrf-real",
+                                "nano-banana", "midjourney-v6", "aigc-modern"],
                        help="Additional manifest(s) whose cached views are CONCATENATED onto the "
                             "training rows. Each keeps its own stem and fingerprint check, so the "
                             "base pool's cache is reused rather than recomputed. Embed them first "
                             "with the same --train-views/--with-chains selection.")
+    p_thv.add_argument("--exclude-generators", nargs="+", default=None, metavar="NAME",
+                       help="Drop training rows whose manifest `generator` matches (case-insensitive), "
+                            "e.g. --exclude-generators BigGAN CycleGAN GauGAN StarGAN StyleGAN StyleGAN2. "
+                            "Filters the cached rows in place -- no re-embedding -- and leaves the scaler "
+                            "computed on the FULL clean view so the only variable is which rows train.")
     p_thv.add_argument("--balance", action="store_true",
                        help="Weight the loss so the two classes contribute equally (pos_weight = "
                             "n_real/n_aigc). Use when an extra manifest skews the label prior -- "
@@ -662,6 +698,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_thv.add_argument("--with-chains", action="store_true",
                        help="Also train on the 4 trainchain_* views (composition, built only from "
                             "severities already in the default set). The 3 SCORED chains stay held out.")
+    p_thv.add_argument("--all-severities", action="store_true",
+                       help="THE SHIPPING RECIPE. Train on all 19 views: every severity of "
+                            "every degradation family plus the 4 trainchain_* views. Only the 3 "
+                            "SCORED chains stay held out. Supersedes --with-chains. Embed the "
+                            "manifests with the same view selection first.")
     p_thv.add_argument("--clean-only", action="store_true",
                        help="Control arm: train on the clean view alone, same images, same scaler.")
     p_thv.add_argument("--head", default="linear", choices=["linear", "mlp", "mlp2"])
@@ -678,7 +719,7 @@ def build_parser() -> argparse.ArgumentParser:
         "eval-grid", help="Score a trained head across every cached robustness view (5.5.4)."
     )
     p_eval_grid.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
-    p_eval_grid.add_argument("--manifest", required=True, choices=["train", "train-ext", "sid-real", "photo-real", "unsplash-real", "pexels-real", "wildrf-real", "val", "heldout", "demo-val", "ood", "wildrf-test"])
+    p_eval_grid.add_argument("--manifest", required=True, choices=MANIFEST_CHOICES)
     p_eval_grid.add_argument("--head", default=None, help="Head checkpoint (default: models/<backbone>__<kind>.pt).")
     p_eval_grid.add_argument("--head-kind", default="linear", choices=["linear", "mlp"],
                              help="Only used to locate the default checkpoint path.")
@@ -700,7 +741,7 @@ def build_parser() -> argparse.ArgumentParser:
              "Needs embed-views cached for the same (backbone, manifest, sample-rows) first.",
     )
     p_err.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
-    p_err.add_argument("--manifest", required=True, choices=["train", "train-ext", "sid-real", "photo-real", "unsplash-real", "pexels-real", "wildrf-real", "val", "heldout", "demo-val", "ood", "wildrf-test"])
+    p_err.add_argument("--manifest", required=True, choices=MANIFEST_CHOICES)
     p_err.add_argument("--head", default=None, help="Head checkpoint (default: models/<backbone>__<kind>.pt).")
     p_err.add_argument("--head-kind", default="linear", choices=["linear", "mlp"],
                         help="Only used to locate the default checkpoint path.")
@@ -734,11 +775,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_predict.add_argument("--output", required=True, help="Path to write the JSON predictions array to.")
     p_predict.add_argument(
         "--head", default=None,
-        help="Head checkpoint path (default: models/pe-core-l__linear__trainext.pt).",
+        help="Head checkpoint path (default: models/pe-core-l__linear__allsev_e1.pt).",
     )
     p_predict.add_argument("--threshold", type=float, default=None,
                            help="Decision boundary for the flagged/not-flagged summary line "
-                                "(default: predict.DECISION_THRESHOLD = 0.94, chosen on a held-out "
+                                "(default: predict.DECISION_THRESHOLD = 0.980, chosen on a held-out "
                                 "WildRF split). Does NOT change the JSON, which always carries the "
                                 "raw probability in 'pred' as the brief requires.")
     p_predict.add_argument("--batch-size", type=int, default=32)

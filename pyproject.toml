@@ -32,6 +32,13 @@ demo = [
     "requests>=2.32",
 ]
 
+# Also not graded -- backs scripts/plot_stats.py, which renders the training
+# curves and evaluation charts under stats/. Kept out of the base set for the
+# same reason as `demo`. Install with `uv sync --extra viz`.
+viz = [
+    "matplotlib>=3.9",
+]
+
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu130" }]
 torchvision = [{ index = "pytorch-cu130" }]

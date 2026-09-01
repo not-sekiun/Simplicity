@@ -5,7 +5,8 @@ to do with image content -- most notoriously, aspect ratio: if every AIGC
 image happens to be a square render and every real photo is not, a model
 (or even a non-aspect-preserving resize in the pipeline) can "solve" the task
 by looking at width/height alone. This script is a repeatable check for that
-class of bug, run against data/raw/*_index.csv (NEVER data/demo_val/, which
+class of bug, run against */_index.csv under every corpus dir in AUDIT_DIRS
+-- data/raw, data/aigc_ext, data/real_ext (NEVER data/demo_val/, which
 is a policy-isolated benchmark this script must not touch).
 
 It does three things per source (plus pooled across all sources):
@@ -48,17 +49,28 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import balanced_accuracy_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 
-from aigc_detect.config import LABEL_NAMES, RANDOM_SEED, RAW_DIR
+from aigc_detect.config import AIGC_EXT_DIR, LABEL_NAMES, RANDOM_SEED, RAW_DIR, REAL_EXT_DIR
 
 PROBE_SIDE = 16  # downscale side length for the blind probe (16x16 = 256-dim)
 SHORTCUT_THRESHOLD = 0.70  # balanced accuracy above this -> a shortcut survives
 
 
+# Every directory that publishes a *_index.csv the probe must cover. RAW_DIR
+# alone was the original list, and it silently excluded every corpus added
+# after it: the aigc_ext pulls and the real_ext domains were never probed, so
+# the SD3 recaption fault (real photos labelled AIGC -- data/quarantine/) went
+# straight into training with the audit reporting nothing wrong. A new corpus
+# directory MUST be added here, or the audit passes by not looking.
+AUDIT_DIRS = (RAW_DIR, AIGC_EXT_DIR, REAL_EXT_DIR)
+
+
 def load_source_frames() -> dict[str, pd.DataFrame]:
-    """One DataFrame per data/raw/<source>_index.csv (never demo_val)."""
-    index_files = sorted(RAW_DIR.glob("*_index.csv"))
+    """One DataFrame per <audit dir>/<source>_index.csv (never demo_val)."""
+    index_files = sorted(f for d in AUDIT_DIRS if d.exists() for f in d.glob("*_index.csv"))
     if not index_files:
-        raise FileNotFoundError(f"No *_index.csv files found under {RAW_DIR}.")
+        raise FileNotFoundError(
+            f"No *_index.csv files found under any of: {', '.join(str(d) for d in AUDIT_DIRS)}."
+        )
     frames: dict[str, pd.DataFrame] = {}
     for f in index_files:
         df = pd.read_csv(f)

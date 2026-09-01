@@ -1,0 +1,74 @@
+==============================================================================
+DATA SHORTCUT AUDIT (raw images)
+==============================================================================
+
+--- source: aigc_modern_midjourney_v6 ---
+  [aigc label=1] total=1500 sampled=400
+    formats:          [('JPEG', 400)]
+    top resolutions:  [((1024, 1024), 400)]
+    aspect ratio:     min=1.000 median=1.000 max=1.000
+    pct exactly sq.:  100.0%
+  [blind probe] n=400 -- skipped (need >=2 classes, >=10 samples)
+
+--- source: aigc_modern_nano_banana ---
+  [aigc label=1] total=1500 sampled=400
+    formats:          [('JPEG', 400)]
+    top resolutions:  [((1024, 1024), 400)]
+    aspect ratio:     min=1.000 median=1.000 max=1.000
+    pct exactly sq.:  100.0%
+  [blind probe] n=400 -- skipped (need >=2 classes, >=10 samples)
+
+--- source: cifake ---
+  [real label=0] total=60000 sampled=400
+    formats:          [('JPEG', 400)]
+    top resolutions:  [((32, 32), 400)]
+    aspect ratio:     min=1.000 median=1.000 max=1.000
+    pct exactly sq.:  100.0%
+  [aigc label=1] total=60000 sampled=400
+    formats:          [('JPEG', 400)]
+    top resolutions:  [((32, 32), 400)]
+    aspect ratio:     min=1.000 median=1.000 max=1.000
+    pct exactly sq.:  100.0%
+  [blind probe] n=800 balanced_acc=0.6375 roc_auc=0.7062 -> PASS
+
+--- source: sid_set ---
+  [real label=0] total=4000 sampled=400
+    formats:          [('JPEG', 400)]
+    top resolutions:  [((1024, 768), 99), ((1024, 683), 84), ((1024, 681), 18), ((768, 1024), 18), ((683, 1024), 14)]
+    aspect ratio:     min=0.529 median=1.333 max=3.314
+    pct exactly sq.:  3.8%
+  [aigc label=1] total=4000 sampled=400
+    formats:          [('JPEG', 400)]
+    top resolutions:  [((1024, 1024), 400)]
+    aspect ratio:     min=1.000 median=1.000 max=1.000
+    pct exactly sq.:  100.0%
+  [blind probe] n=800 balanced_acc=0.9708 roc_auc=0.9935 -> WARN (shortcut likely survives)
+
+--- source: tiny_genimage ---
+  [real label=0] total=14000 sampled=400
+    formats:          [('JPEG', 400)]
+    top resolutions:  [((500, 375), 91), ((500, 333), 48), ((375, 500), 17), ((500, 334), 15), ((333, 500), 13)]
+    aspect ratio:     min=0.531 median=1.333 max=2.874
+    pct exactly sq.:  3.2%
+  [aigc label=1] total=14000 sampled=400
+    formats:          [('JPEG', 400)]
+    top resolutions:  [((256, 256), 187), ((512, 512), 107), ((128, 128), 53), ((1024, 1024), 53)]
+    aspect ratio:     min=1.000 median=1.000 max=1.000
+    pct exactly sq.:  100.0%
+  [blind probe] n=800 balanced_acc=0.4667 roc_auc=0.4430 -> PASS
+
+--- source: unsplash_real ---
+  [real label=0] total=4000 sampled=400
+    formats:          [('JPEG', 400)]
+    top resolutions:  [((768, 512), 125), ((512, 768), 110), ((512, 640), 22), ((683, 512), 21), ((767, 512), 12)]
+    aspect ratio:     min=0.562 median=1.334 max=1.857
+    pct exactly sq.:  1.0%
+  [blind probe] n=400 -- skipped (need >=2 classes, >=10 samples)
+
+--- pooled (all sources, n=3600) ---
+  [blind probe] n=3600 balanced_acc=0.5829 roc_auc=0.6419 -> PASS
+
+==============================================================================
+Verdict threshold: balanced_acc >= 0.70 on a 16x16-grayscale blind
+probe means a label shortcut (e.g. aspect ratio / resolution) survives.
+==============================================================================

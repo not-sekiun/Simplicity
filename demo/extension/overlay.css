@@ -18,9 +18,13 @@
   transform: translateY(-100%);
   z-index: 2147483647;
   pointer-events: none;
-  font: 600 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  /* --aigc-badge-scale is set once on the overlay root (see
+     ensureOverlayRoot() in content.js) from the popup's "tag size" slider --
+     font size and padding both scale together so the badge stays proportioned
+     at any size instead of just growing taller. */
+  font: 600 calc(12px * var(--aigc-badge-scale, 1))/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: #111;
-  padding: 2px 7px;
+  padding: calc(2px * var(--aigc-badge-scale, 1)) calc(7px * var(--aigc-badge-scale, 1));
   border-radius: 4px 4px 4px 0;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
   white-space: nowrap;

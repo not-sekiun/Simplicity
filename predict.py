@@ -20,7 +20,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 from aigc_detect.config import ROOT_DIR  # noqa: E402
 from aigc_detect.predict import run_inference  # noqa: E402
 
-DEFAULT_HEAD = ROOT_DIR / "models" / "pe-core-l__linear__augchain.pt"
+# Keep in sync with main.py and demo/server.py -- this is the graded 5.5.2
+# entry point, so a stale default here scores the submission with the wrong head.
+DEFAULT_HEAD = ROOT_DIR / "models" / "pe-core-l__linear__allsev_e1.pt"
 
 
 def build_parser() -> argparse.ArgumentParser:

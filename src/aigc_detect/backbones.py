@@ -45,6 +45,12 @@ BACKBONE_REGISTRY: dict[str, dict] = {
     },
     "pe-core-l": {
         "checkpoint": "timm/vit_pe_core_large_patch14_336.fb",
+        # PINNED. The shipping head's decision threshold (0.980) is calibrated
+        # against these exact weights -- a silent upstream re-upload would move
+        # every score and quietly invalidate the threshold without any error.
+        # Weights are ~1.2 GB, downloaded once by timm into the HuggingFace
+        # cache; see README "Offline / air-gapped use".
+        "revision": "e63206c8e3a0e9b699e40f31080eebd78fd2258e",
         "loader": "timm",
         "pooled_dim": 1024,
         "native_res": 336,
@@ -104,12 +110,22 @@ def _strip_timm_org_prefix(checkpoint: str) -> str:
     return checkpoint[len("timm/"):] if checkpoint.startswith("timm/") else checkpoint
 
 
-def _load_timm_backbone(checkpoint: str):
+def _load_timm_backbone(checkpoint: str, revision: str | None = None):
+    """Load a frozen timm backbone, optionally pinned to an exact hub revision.
+
+    ``revision`` uses timm's ``hf-hub:<repo>@<sha>`` form. Pinning matters here
+    for a specific reason: the shipping threshold is calibrated against one set
+    of weights, so an upstream re-upload would shift every score with no error
+    raised anywhere. Unpinned entries keep the previous behaviour (timm resolves
+    the ``timm/`` org itself from the bare architecture.tag name).
+    """
     import timm
     from timm.data import resolve_model_data_config
 
-    model_name = _strip_timm_org_prefix(checkpoint)
-    model = timm.create_model(model_name, pretrained=True, num_classes=0)
+    if revision:
+        model = timm.create_model(f"hf-hub:{checkpoint}@{revision}", pretrained=True, num_classes=0)
+    else:
+        model = timm.create_model(_strip_timm_org_prefix(checkpoint), pretrained=True, num_classes=0)
     data_cfg = resolve_model_data_config(model)
     mean, std = tuple(data_cfg["mean"]), tuple(data_cfg["std"])
     return model, mean, std, "timm.data.resolve_model_data_config", checkpoint
@@ -151,7 +167,9 @@ def load_backbone(key: str):
     used_fallback = False
 
     if entry["loader"] == "timm":
-        module, mean, std, norm_source, used_checkpoint = _load_timm_backbone(entry["checkpoint"])
+        module, mean, std, norm_source, used_checkpoint = _load_timm_backbone(
+            entry["checkpoint"], entry.get("revision")
+        )
     elif key.startswith("metaclip2"):
         # Family dispatch, not per-key: every MetaCLIP2 checkpoint loads through
         # the same vision-tower class. Keying on the exact name meant adding a

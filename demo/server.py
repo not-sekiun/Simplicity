@@ -22,7 +22,7 @@ changes; the /health endpoint's backbone/head fields are for the popup UI
 to *display*, not for the extension to branch on.
 
     uv sync --extra demo
-    uv run python demo/server.py --head models/pe-core-l__linear__trainext.pt
+    uv run python demo/server.py --head models/pe-core-l__linear__allsev_e1.pt
 
 Endpoints:
     GET  /health                        {"ready": bool, "backbone": str, "head": str}
@@ -65,7 +65,7 @@ from aigc_detect.config import ROOT_DIR  # noqa: E402
 from aigc_detect.heads import build_head  # noqa: E402
 from aigc_detect.transforms import build_backbone_transform  # noqa: E402
 
-DEFAULT_HEAD = ROOT_DIR / "models" / "pe-core-l__linear__trainext.pt"
+DEFAULT_HEAD = ROOT_DIR / "models" / "pe-core-l__linear__allsev_e1.pt"
 FETCH_TIMEOUT = 6.0
 FETCH_HEADERS = {
     # Reddit/Instagram reject or throttle requests with no browser-like UA.

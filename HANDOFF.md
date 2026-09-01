@@ -1,11 +1,62 @@
 # Handoff
 
-**Written 2026-08-29. Section A rewritten 2026-08-30 and supersedes everything
-below it where they disagree.**
+**Written 2026-08-29. Section A rewritten 2026-08-30, amended twice since, and
+supersedes everything below it where they disagree. Read A0 first — it is the
+newest layer and it supersedes A and A's own amendment.**
 
 ---
 
-# A. CURRENT STATE (2026-08-30) — read this first
+# A0. CURRENT STATE (2026-08-31) — THIS IS WHAT SHIPS
+
+**Ship `models/pe-core-l__linear__allsev_e1.pt` at threshold 0.980.** Already the
+default in `predict.py`, `main.py predict`, `demo/server.py` and
+`scripts/export_eval_stats.py`.
+
+```
+uv run main.py train-head-views --backbone pe-core-l --all-severities \
+  --val-sample-rows 2000 --train-manifest train-ext \
+  --extra-train-manifest sid-real unsplash-real nano-banana midjourney-v6 \
+  --balance --epochs 1 --out models/pe-core-l__linear__allsev_e1.pt
+```
+
+Verified to reproduce the shipped checkpoint bit-for-bit. `--all-severities`
+replaces `--with-chains`: it trains on all 19 views (every severity of every
+family + the 4 `trainchain_*` views) and holds out only the 3 SCORED chains.
+The flag exists because view ORDER changes the shuffle and therefore the
+weights — listing the views by hand is one transposition from not reproducing.
+
+`--epochs 1` is still load-bearing, but **the validation curve no longer shows
+why**: on this recipe epoch 2 slightly RAISES val AUC_robust (0.9832 → 0.9838)
+while every held-out tier falls (DALL·E 3 recall 0.958 → 0.942, OOD 17-view
+recall 0.714 → 0.671). Do not use val to pick the epoch here.
+
+| tier | clean AUC | 17-view mean | vs previous head |
+|---|---|---|---|
+| `ood` | **0.9982** | 0.9724 | +0.0035 |
+| `wildrf_test` | **0.9969** | 0.9875 | +0.0020 |
+| `demo_val` | **0.9999** | 0.9960 | -0.0002 |
+| `dalle3_holdout` | **0.9988** | 0.9917 | +0.0011 |
+
+Held out on WildRF at 0.980: **FPR 2.15% / TPR 97.97%**.
+
+**vs the previous head, honestly.** Not strict dominance: +1.05 points of recall
+(95% CI [+0.51, +1.68]) at an FPR difference whose CI spans zero. Matched on
+either axis it wins the other. The decisive margin is on the three scored chains,
+held out by BOTH heads, where OOD recall at a matched 2.5% FPR goes .4183 →
+.6098. Part of its margin on the 18-view means is coverage, not generalisation —
+it trains on 7 views the previous head held out. Say so when reporting it.
+
+**The threshold protocol is now code**, not prose: `scripts/derive_threshold.py`,
+with the split pinned. It was reconstructed by hand twice and came out different
+both times, which is why FINDINGS 2j and 2k disagree in the third decimal. Run
+`--verify` to confirm the protocol still reproduces 2j's recorded table, and
+`--head <ckpt>` on every swap. NOTE: under the pinned split the previous head
+derives to 0.990, not the 0.985 it actually shipped at — that 0.985 came from the
+lost split and is not reproducible.
+
+---
+
+# A. SUPERSEDED (2026-08-30) — kept for the reasoning, not the instruction
 
 ## Ship this
 
@@ -37,6 +88,40 @@ the control for anything that questions whether train_ext earned its place.
 
 **Threshold is a property of the head. Re-derive it on every swap** — the sweep
 is in FINDINGS 2j and takes about a minute on cached embeddings.
+
+## AMENDMENT (2026-08-30, later) — THIS SUPERSEDES "Ship this" ABOVE
+
+**Ship `models/pe-core-l__linear__aigcmodern_nosd3_e1.pt` at threshold 0.985.**
+Already the default in `predict.py`, `demo/server.py` and `main.py predict`.
+
+```
+uv run main.py train-head-views --backbone pe-core-l --with-chains   --val-sample-rows 2000 --train-manifest train-ext   --extra-train-manifest sid-real unsplash-real nano-banana midjourney-v6   --balance --epochs 1 --out models/pe-core-l__linear__aigcmodern_nosd3_e1.pt
+```
+
+Note `--epochs 1`. There is no best-epoch selection; epoch 2 overfits
+robustness in every arm measured.
+
+| tier | metric | trainext (0.940) | **nosd3_e1 (0.985)** |
+|---|---|---|---|
+| **held-out WildRF** | **FPR / TPR @ threshold** | .0280 / .9663 | **.0246 / .9773** |
+| WildRF | clean AUC | 0.9945 | **0.9969** |
+| ood | clean AUC | 0.9978 | **0.9979** |
+| demo_val | clean AUC | 0.9995 | **0.9999** |
+| **DALLE3 (unseen, held out)** | clean TPR@t | 0.9693 | **0.9900** |
+| **DALLE3** | 18-view mean TPR@t | 0.8900 | **0.9457** |
+| **DALLE3** | worst-view TPR@t | 0.5140 | **0.6973** |
+
+**Lower FPR and higher recall at once** — not a trade. And DALLE3, a generator
+from neither training source, improves on all 18 views: the modern-generator
+data generalizes rather than source-matching. FINDINGS 2k has the full arc,
+including the mislabelled SD3 corpus that nearly shipped this as a regression.
+
+**Do not re-add `gmongaras/Stable_Diffusion_3_Recaption`** — real photographs,
+not SD3 output. Quarantined under `data/quarantine/` and removed from the CLI.
+
+**Known caveats on the new head.** WildRF gains are carried by Reddit; Twitter
+and Facebook FPR regress slightly (FINDINGS 2k). Worst FPR view is now
+`jpeg_q70` — a trained view, and the closest to real CDN recompression.
 
 ## What changed since the race
 

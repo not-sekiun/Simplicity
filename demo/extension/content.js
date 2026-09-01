@@ -14,8 +14,14 @@
 // nothing here changes.
 
 (async () => {
-  const DEFAULTS = { threshold: 0.5, minSize: 150, debugMode: false };
-  const { threshold: AIGC_THRESHOLD, minSize: MIN_SIZE, debugMode: DEBUG_MODE } = await loadConfig();
+  const DEFAULTS = { threshold: 0.5, minSize: 150, debugMode: false, borderWidth: 4, badgeScale: 1 };
+  const {
+    threshold: AIGC_THRESHOLD,
+    minSize: MIN_SIZE,
+    debugMode: DEBUG_MODE,
+    borderWidth: BORDER_WIDTH,
+    badgeScale: BADGE_SCALE,
+  } = await loadConfig();
 
   const BATCH_SIZE = 6;
   const BATCH_DELAY_MS = 150; // debounce so fast scrolling coalesces into one request
@@ -26,7 +32,7 @@
   const MAX_ASPECT = 3.0; // wider than ~3:1
 
   async function loadConfig() {
-    const stored = await chrome.storage.local.get(["threshold", "minSize", "debugMode"]);
+    const stored = await chrome.storage.local.get(["threshold", "minSize", "debugMode", "borderWidth", "badgeScale"]);
     return { ...DEFAULTS, ...stored };
   }
 
@@ -94,6 +100,8 @@
     if (!root) {
       root = document.createElement("div");
       root.id = "__aigc_detect_overlay_root__";
+      // Read by overlay.css's badge rule (font-size/padding scale by this).
+      root.style.setProperty("--aigc-badge-scale", BADGE_SCALE);
       document.documentElement.appendChild(root);
     }
     return root;
@@ -106,14 +114,37 @@
   // and hide the badge whenever something else is frontmost there, so the
   // label disappears in lockstep with the box it's annotating instead of
   // floating in front of whatever is now covering it.
+  // BUG (found live on Instagram/TikTok feeds, both: outline shows, badge
+  // never does): elementFromPoint() only returns the SINGLE topmost hit at
+  // that point. Every video on both sites sits under one or more plain
+  // <div>s stacked above it purely for click/tap handling (mute toggle,
+  // tap-to-pause, a controls layer) -- fully transparent, no visible paint
+  // of their own. The old check treated any such div as "occluding" since
+  // it's neither the element nor a container/containee of it, so the badge
+  // was hidden on essentially every video on both sites even though nothing
+  // was actually covering it on screen.
+  //
+  // elementsFromPoint() (plural) returns the FULL paint-order stack at that
+  // point instead of just the top hit. Walk it looking for el, skipping past
+  // anything with no visible paint of its own (transparent background, no
+  // background image) -- those are hit-testing layers, not occlusion. Only a
+  // node with actual paint sitting in front of el (a modal, a lightbox, a
+  // card that's slid in over it) counts as truly occluding.
   function isElementOccluded(el, r) {
     const cx = r.left + r.width / 2;
     const cy = r.top + r.height / 2;
     if (cx < 0 || cy < 0 || cx > window.innerWidth || cy > window.innerHeight) {
       return false; // off-screen -- not "covered", just out of the viewport
     }
-    const top = document.elementFromPoint(cx, cy);
-    return !!top && top !== el && !el.contains(top) && !top.contains(el);
+    const stack = document.elementsFromPoint(cx, cy);
+    for (const node of stack) {
+      if (node === el || node.contains(el) || el.contains(node)) return false;
+      const style = getComputedStyle(node);
+      const hasVisiblePaint =
+        style.backgroundImage !== "none" || !/^(rgba\(0,\s*0,\s*0,\s*0\)|transparent)$/.test(style.backgroundColor);
+      if (hasVisiblePaint) return true; // something actually painted is in front of el
+    }
+    return true; // el never showed up in the stack at all
   }
 
   // Shared by both <img> and <video> badges.
@@ -162,8 +193,8 @@
       removeBadge(src);
       return;
     }
-    img.style.outline = `4px solid ${badgeColor(pred)}`;
-    img.style.outlineOffset = "-2px";
+    img.style.outline = `${BORDER_WIDTH}px solid ${badgeColor(pred)}`;
+    img.style.outlineOffset = `${-BORDER_WIDTH / 2}px`;
     upsertBadge(img, src, pred);
   }
 
@@ -349,8 +380,8 @@
       clearVideoIndicator(video);
       return;
     }
-    video.style.outline = `4px solid ${badgeColor(smoothed)}`;
-    video.style.outlineOffset = "-2px";
+    video.style.outline = `${BORDER_WIDTH}px solid ${badgeColor(smoothed)}`;
+    video.style.outlineOffset = `${-BORDER_WIDTH / 2}px`;
     if (!state.badge) {
       state.badge = document.createElement("div");
       state.badge.className = "__aigc_detect_badge__";
@@ -400,7 +431,17 @@
         videoState.delete(video);
         continue;
       }
-      if (state.inFlight || video.paused || video.readyState < video.HAVE_CURRENT_DATA) continue;
+      // NOT `|| video.paused`: BUG (found live on Instagram's explore grid --
+      // https://www.instagram.com/explore/ -- vs. TikTok's equivalent, which
+      // worked): that grid's preview clips are paused by design, only
+      // playing on hover/tap, yet still have a real decoded frame sitting on
+      // the element (readyState HAVE_ENOUGH_DATA) the instant they scroll
+      // into view. Gating on `!paused` meant videoTick() skipped every one
+      // of them forever -- zero requests ever went out, so nothing was ever
+      // scored, with no error to show for it. readyState alone is the right
+      // gate: it's "is there a frame to capture", not "is it currently
+      // playing".
+      if (state.inFlight || video.readyState < video.HAVE_CURRENT_DATA) continue;
       const r = video.getBoundingClientRect();
       if (r.width < MIN_SIZE || r.height < MIN_SIZE) continue;
       if (r.bottom <= 0 || r.top >= window.innerHeight || r.right <= 0 || r.left >= window.innerWidth) continue;

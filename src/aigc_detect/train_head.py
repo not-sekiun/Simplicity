@@ -96,6 +96,19 @@ TRAIN_VIEWS_DEFAULT = (
 # the three scored chains remain unseen. See transforms.TRAIN_CHAIN_SPECS.
 TRAIN_VIEWS_WITH_CHAINS = TRAIN_VIEWS_DEFAULT + train_chain_view_names()
 
+# EVERY severity of every family, plus the four training chains: 19 views. This
+# is what the SHIPPING head trains on, and it holds out exactly one thing -- the
+# three SCORED chains, which are compositions it never sees in any form.
+#
+# It exists as a named constant rather than 19 arguments because order is load
+# bearing: the training rows are concatenated view by view, so a different order
+# is a different shuffle and therefore different final weights. A reproduce
+# command that lists the views by hand is one transposition away from silently
+# not reproducing.
+TRAIN_VIEWS_ALL_SEVERITIES = tuple(
+    [v for v in eval_view_names() if not v.startswith("chain_")]
+) + train_chain_view_names()
+
 
 def _grid_auc(head, device, view_arrays, mean, std) -> tuple[float, float]:
     """(AUC_clean, AUC_robust pooled) over cached val views -- the actual
@@ -133,6 +146,7 @@ def train_head_on_views(
     seed: int = RANDOM_SEED,
     extra_train: Sequence[tuple[str, str | Path | None]] = (),
     balance_classes: bool = False,
+    exclude_generators: Sequence[str] = (),
 ):
     """Train a head on cached CLEAN + DEGRADED embeddings of the same images.
 
@@ -169,6 +183,24 @@ def train_head_on_views(
     still comes from the BASE stem's clean view alone: it is a preprocessing
     constant that ships in the checkpoint and gets applied to arbitrary images at
     inference, so holding it fixed keeps the added rows the single variable.
+
+    ``exclude_generators`` drops TRAINING rows whose manifest ``generator`` column
+    matches (case-insensitively), e.g. to ask what the head learns with no GAN
+    output in the pool at all. The mask is built from the same
+    ``select_rows(manifest)`` call the cache was written from, so cache row i and
+    manifest row i are the same image -- no re-embedding is needed to hold out a
+    subset of an already-embedded manifest. Two deliberate choices:
+
+      * The filter runs AFTER the scaler is computed, so the standardizer is
+        bit-identical to the unfiltered run's. Same reasoning as ``extra_train``
+        above -- the single variable stays "which rows the head saw", not "which
+        statistics standardized them", and it also keeps the two heads' score
+        distributions directly comparable.
+      * Every stem is filtered, not just the base one, so the flag means the same
+        thing regardless of which manifest a generator happens to live in.
+
+    It requires the corresponding manifest to be passed (there is no generator
+    column in the .npz), and hard-fails rather than silently training unfiltered.
 
     ``balance_classes`` sets BCE's ``pos_weight`` to n_real/n_aigc. An extra
     manifest that is all one class shifts the label prior, and a prior shift
@@ -269,6 +301,38 @@ def train_head_on_views(
     std[std == 0] = 1.0
 
     all_sets = [train_arrays, *extra_arrays]
+
+    if exclude_generators:
+        drop = {g.strip().lower() for g in exclude_generators}
+        stems = [(train_stem, train_manifest, train_sample_rows),
+                 *[(st, mf, None) for st, mf in extra_train]]
+        for (stem, manifest, sample_rows), arrays in zip(stems, all_sets):
+            if manifest is None:
+                raise SystemExit(
+                    f"[train-views] --exclude-generators needs the manifest for stem '{stem}' "
+                    f"to read its generator column; none was passed."
+                )
+            df = select_rows(manifest, sample_rows=sample_rows).reset_index(drop=True)
+            n_cached = len(arrays["clean"][0])
+            if len(df) != n_cached:
+                raise SystemExit(
+                    f"[train-views] STALE: stem '{stem}' manifest has {len(df):,} rows but its "
+                    f"cache has {n_cached:,}; the row mask would not line up. Re-run embed-views."
+                )
+            if "generator" not in df.columns:
+                raise SystemExit(f"[train-views] manifest for stem '{stem}' has no generator column.")
+            keep = ~df["generator"].astype(str).str.strip().str.lower().isin(drop).to_numpy()
+            n_dropped = int((~keep).sum())
+            if n_dropped:
+                for v in train_views:
+                    emb, lab = arrays[v]
+                    arrays[v] = (emb[keep], lab[keep])
+                gone = sorted(set(df.loc[~keep, "generator"].astype(str)))
+                print(f"[train-views] excluded from stem={stem}: {n_dropped:,} images "
+                      f"({n_dropped / n_cached:.1%}) -- {', '.join(gone)}")
+            else:
+                print(f"[train-views] excluded from stem={stem}: nothing matched")
+
     x = np.concatenate([(arrays[v][0] - mean) / std for v in train_views for arrays in all_sets])
     y = np.concatenate([arrays[v][1] for v in train_views for arrays in all_sets]).astype(np.float32)
 
@@ -349,6 +413,7 @@ def train_head_on_views(
             "train_stem": train_stem,
             "extra_train_stems": [s for s, _ in extra_train],
             "balance_classes": bool(balance_classes),
+            "excluded_generators": list(exclude_generators),
             "train_views": list(train_views),
             "held_out_views": held_out,
             "epochs": epochs,

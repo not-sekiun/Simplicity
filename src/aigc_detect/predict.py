@@ -123,25 +123,48 @@ def _to_posix_relative(path: Path, input_dir: Path) -> str:
 # boundary for the console summary, for demo/server.py, and for anything else
 # that needs a yes/no rather than a score.
 #
-# 0.94, not 0.5. Chosen on a HELD-OUT split so the number is not tuned on the
-# tier it is reported against: WildRF (2,503 real Reddit/X/Facebook photographs
-# and real-world AI) pooled over clean + the CDN-like views a browser extension
-# actually sees (jpeg_q70, jpeg_q90, resize_0.5x, chain_light), split by IMAGE so
-# no image appears on both sides, threshold swept in 0.005 steps and picked by F1
-# on one half, then reported on the other:
+# 0.98, not 0.5. Chosen on a HELD-OUT split so the number is not tuned on the
+# tier it is reported against. The protocol is no longer prose: it lives in
+# scripts/derive_threshold.py, which pins the split that was twice reconstructed
+# by hand and twice came out different. Re-derive on every head swap --
 #
-#     head        chosen   HELD-OUT FPR   HELD-OUT TPR
-#     photoreal    0.920         0.0408         0.9721
-#     trainext     0.940         0.0283         0.9686   <-- shipping
+#     uv run python scripts/derive_threshold.py --head models/<name>.pt
+#
+# WildRF (2,503 real Reddit/X/Facebook photographs and real-world AI, which
+# nothing trains on) pooled over clean + the CDN-like views a browser extension
+# actually sees (jpeg_q70, jpeg_q90, resize_0.5x, chain_light), split by IMAGE so
+# no image appears on both sides, swept in 0.005 steps, picked by F1 on half A,
+# reported on half B:
+#
+#     head              chosen   HELD-OUT FPR   HELD-OUT TPR
+#     photoreal          0.920         0.0408         0.9721
+#     trainext           0.940         0.0283         0.9686
+#     nosd3_e1           0.990         0.0180         0.9692   <-- previous
+#     alltransforms_e1   0.985         0.0248         0.9768
+#     allsev_e1          0.980         0.0215         0.9797   <-- SHIPPING
+#
+# NOTE the previous head shipped at 0.985, not the 0.990 above. That 0.985 came
+# from a split that was never recorded and cannot be reproduced. Every row here
+# comes from the one pinned split, so the rows are comparable to each other even
+# where they differ from what was historically shipped.
+#
+# allsev_e1 vs nosd3_e1 is NOT strict dominance. It is +1.05 points of recall
+# (95% CI [+0.51, +1.68]) at an FPR difference of +0.34 points whose CI spans
+# zero. Matched on either axis it wins the other: at nosd3_e1's own FPR its
+# recall is .9771 vs .9692 (97 misses -> 72); at allsev_e1's own recall its FPR
+# is .0215 vs .0251. The decisive margin is on degradations NEITHER head trained
+# on -- the three scored chains -- where OOD recall at a matched 2.5% FPR goes
+# .4183 -> .6098. See FINDINGS 2l.
+#
+# It is the 1-EPOCH arm. train_head_on_views saves the final epoch with no
+# best-epoch selection and epoch 2 overfits robustness (allsev_e2 gives the whole
+# gain back: ood transformed mean .9724 -> .9693). Train with --epochs 1.
 #
 # At threshold 0.5 the same tier gives FPR 0.1875 / TPR 0.9949, so this is a
-# ~6.6x cut in false positives for ~2.6 points of recall. That trade is right
+# large cut in false positives for a small amount of recall. That trade is right
 # for this product: telling someone their own photograph is AI-generated costs
 # far more than missing one AI image among many.
-#
-# Re-derive this whenever the head changes -- it is a property of the head, not
-# a constant. The sweep lives in FINDINGS 2j.
-DECISION_THRESHOLD = 0.94
+DECISION_THRESHOLD = 0.980
 
 
 def run_inference(
@@ -240,6 +263,30 @@ def run_inference(
             std_t = torch.from_numpy(scaler_std).to(feats.device)
             x = (feats - mean_t) / std_t
             logits = head(x).squeeze(-1)
+            # RAW sigmoid, deliberately. Do not "improve" this with calibration.
+            #
+            # These scores are badly calibrated as probabilities -- measured on
+            # held-out WildRF, a raw 0.95 corresponds to an actual P(AIGC) of
+            # 0.26, and a raw 0.61 to 0.026. Platt scaling fixes that (Brier
+            # 0.0722 -> 0.0157, log-loss 0.2432 -> 0.0615) and is tempting.
+            #
+            # It would not buy a single point of score. The competition metric is
+            #     0.5 * AUC_clean + 0.5 * AUC_robust
+            # and AUC depends only on the ORDER of the scores, so any strictly
+            # monotone map leaves it bit-identical -- measured, not assumed:
+            # raw and Platt both give 0.99717 on the held-out half. Isotonic is
+            # monotone but not STRICTLY monotone (it is a step function), so it
+            # ties scores together and actively costs AUC: 0.99671.
+            #
+            # Ensembling several heads is not monotone in any one head and so
+            # COULD move AUC. It was tried: all 41 two-, three- and four-head
+            # combinations of the checkpoints in models/ scored below this head
+            # alone (best 0.99337 vs 0.99357 mean over ood/wildrf/demo_val),
+            # logit- and probability-averaging alike.
+            #
+            # So the score-maximising inference path is the simplest one, and
+            # calibration only becomes worth adding if the deliverable ever
+            # needs a probability rather than a ranking.
             probs = torch.sigmoid(logits).cpu().numpy()
             all_probs[idxs.numpy()] = probs
 

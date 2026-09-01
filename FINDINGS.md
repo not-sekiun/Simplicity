@@ -963,6 +963,178 @@ about the direction, just about the resolution.
 
 ---
 
+## 2k. Modern generators: one mislabelled corpus masked a real gain (2026-08-30)
+
+Pulled three 2024-25 generators from three publishers (1,500 each) to attack the
+diffusion gap 2j left open, DALLE3 held out as the eval tier. Trained with the
+identical recipe, `--extra-train-manifest sid-real unsplash-real` plus the new
+corpora, so the added data is the only variable.
+
+**First run was a clear regression**, worst exactly where the data was supposed
+to help:
+
+| ood metric | control (trainext) | +3 modern corpora |
+|---|---|---|
+| clean AUC | 0.9978 | 0.9950 |
+| 18-view mean | 0.9674 | 0.9566 |
+| DALLE2 clean | 0.9789 | **0.9428** |
+| DALLE2 degraded | 0.7927 | **0.7205** |
+| real FPR@t | 0.011 | 0.019 |
+
+Re-ran at 1 epoch in case the saved-final-epoch rule (`train_head.py`, no
+best-epoch selection) had caught an overshoot. It had not: 0.9949 / 0.9579. The
+regression was real.
+
+### Cause: `gmongaras/Stable_Diffusion_3_Recaption` is not SD3 output
+
+It is a RECAPTIONING corpus -- real photographs with SD3-authored captions. We
+labelled 1,500 real photos `label=1`. Diagnosis, in the order that forced it:
+
+1. **The architecture was never the constraint.** The control head, which never
+   saw any of this data, scores midjourney_v6 at mean P=0.9737 and nano_banana
+   at 0.8738. A capacity ceiling on modern diffusion would have sunk those too.
+2. **SD3 scored 0.0230** -- indistinguishable from genuine photographs (0.0178),
+   not the ~0.5 an over-capacity head produces on the unresolvable. Confidently
+   real, not uncertain.
+3. **Because they are photographs.** 281 distinct resolutions in 400 images vs 1
+   for both genuine dumps; 7.5% square vs 100%; modal sizes 500x500, 640x480,
+   800x600; 78% of the source rejected under 384px, impossible for a 1024x1024
+   renderer. `sd3_000011.jpg` is a scraped product photo with a burned-in
+   "I wanne Buy" watermark.
+
+`SD3 alone contributed roughly half the training loss` (0.2599 -> 0.1275 on
+removal) -- the signature of unfittable label noise. Quarantined to
+`data/quarantine/` with the evidence; removed from `SOURCES`, `config.py` and
+the `main.py` manifest registry so it cannot be re-pulled.
+
+**The `-recap` / `_Recaption` suffix is not a provenance signal in either
+direction.** `Photoroom/midjourney-v6-recap` carries it and IS genuine output.
+Check the pixels: a generator dump has one or two resolutions, a scraped corpus
+has hundreds. That check costs ten seconds and would have caught this
+pre-download.
+
+### With SD3 removed, generator-side data finally moved the needle
+
+`nano-banana` + `midjourney-v6` only, same recipe. Threshold re-derived by 2j's
+protocol (0.005 sweep on WildRF over clean + CDN-like views, split by image,
+F1-optimal on one half, reported on the other); the protocol reproduces
+trainext's recorded 0.940 / .0283 / .9686 as 0.940 / .0272 / .9688.
+
+| tier | metric | trainext | **aigcmodern_nosd3** |
+|---|---|---|---|
+| WildRF | clean AUC | 0.9945 | **0.9960** |
+| WildRF | 18-view mean | 0.9764 | **0.9828** |
+| WildRF | **FPR @ TPR .98** | .0424 | **.0336** |
+| ood | clean AUC | 0.9978 | **0.9980** |
+| ood | 18-view mean | **0.9674** | 0.9664 |
+| ood | **FPR @ TPR .98** | .0265 | **.0165** |
+| ood | DALLE2 degraded | 0.7927 | **0.8203** |
+| demo_val | clean AUC | 0.9995 | **0.9997** |
+| val | clean AUC | 0.9986 | **0.9989** |
+| — | threshold | 0.940 | **0.990** |
+
+**FPR at matched recall falls 21% relative on WildRF and 38% on ood.** AUC is
+flat-to-better everywhere; the ood 18-view mean is -0.0010, noise. Do not read
+the raw own-threshold FPR (.0272 -> .0315) as a regression -- the new head sits
+at higher recall (.9688 -> .9773); the matched-operating-point rows are the
+comparable ones.
+
+**This breaks 2j's pattern.** Three times running, real-side data moved the
+numbers and generator-side data did not. Here generator-side data did -- because
+for the first time the generators were ones we were actually failing on. The
+2j rule survives with its own stated caveat intact.
+
+### Real-image FPR: flat in aggregate, but the platform mix shifted
+
+At each head's own operating point (trainext 0.940 / TPR .9688, nosd3 0.990 /
+TPR .9773), FPR on REAL images only:
+
+| real source | n | trainext clean | nosd3 clean | trainext 18-view | nosd3 18-view |
+|---|---|---|---|---|---|
+| WildRF reddit | 750 | .0267 | **.0213** | .0245 | **.0167** |
+| WildRF twitter | 341 | **.0352** | .0499 | **.0375** | .0415 |
+| WildRF facebook | 160 | **.0437** | .0563 | **.0368** | .0441 |
+| **WildRF all** | 1251 | .0312 | .0336 | .0296 | **.0270** |
+| ood reals | 2000 | .0010 | **.0005** | .0064 | **.0013** |
+| demo_val reals | 1000 | .0010 | **.0000** | .0018 | **.0006** |
+| val reals | 1000 | .0020 | **.0000** | .0129 | **.0027** |
+
+Aggregate WildRF FPR is flat (.0312 -> .0336 clean) but bought a full point of
+recall, which is why the matched-recall row above is the honest comparison. On
+every curated tier the new head is at or near zero.
+
+**Two things worth watching.** (1) The gain is not uniform across platforms:
+Reddit improves clearly, Twitter and Facebook regress. Facebook is n=160, so
+treat it as directional, but Twitter at n=341 is harder to dismiss. (2) The
+new head's worst FPR view on WildRF is `jpeg_q70` at every platform, displacing
+`noise_sigma0.1` — a TRAINED view, and the one closest to real CDN
+recompression, which is the actual deployment condition. Both deserve a look
+before this ships as the default.
+
+### VERDICT: DALLE3 holdout confirms real generalization
+
+The whole point of holding DALLE3 out. Never trained on, fourth independent
+publisher, vetted genuine before use (13 distinct resolutions across 1,500
+images, every ratio on DALL-E 3's native 1:1 / 7:4 modes -- contrast SD3's 281).
+Single-class, so AUC is computed by pairing its fakes against WildRF reals.
+
+| DALLE3 metric | trainext (0.940) | nosd3 e2 (0.995) | **nosd3_e1 (0.985)** |
+|---|---|---|---|
+| clean TPR@t | 0.9693 | 0.9873 | **0.9900** |
+| 18-view mean TPR@t | 0.8900 | 0.9357 | **0.9457** |
+| worst view TPR@t (`noise_sigma0.1`) | 0.5140 | 0.6567 | **0.6973** |
+| 18-view TPR@0.5 | 0.9658 | 0.9890 | **0.9905** |
+| clean AUC vs WildRF reals | 0.9949 | 0.9977 | **0.9984** |
+| 18-view AUC vs WildRF reals | 0.9785 | 0.9889 | **0.9910** |
+
+**All 18 views improve, on every metric, at a HIGHER threshold** -- strict
+dominance, not a recall trade. Training on Midjourney-v6 + nano-banana improved
+detection of a generator from NEITHER source, which is the generalization claim
+2j's caveat said we could not make for train_ext. The worst-case view gains
++18.3 points of recall (0.514 -> 0.697), which is the number that matters for a
+product: it is the failure mode, not the average.
+
+### Ship 1 epoch, not 2 -- and that is a general finding here
+
+`train_head_views` saves the FINAL epoch with no best-epoch selection. Epoch 2
+overfits robustness in every arm measured: val AUC_robust 0.9740 -> 0.9670 on
+the nosd3 arm, 0.9657 -> 0.9581 on the SD3-poisoned one. Threshold re-derived
+with predict.py's exact protocol (WildRF, clean + jpeg_q70/q90/resize_0.5x/
+chain_light, split by image, 0.005 sweep, F1 on half A reported on half B;
+reproduces trainext's recorded 0.940/.0283/.9686 as 0.940/.0280/.9663):
+
+| head | threshold | HELD-OUT FPR | HELD-OUT TPR |
+|---|---|---|---|
+| trainext | 0.940 | .0280 | .9663 |
+| nosd3 (2 epoch) | 0.995 | **.0224** | .9643 |
+| **nosd3_e1** | **0.985** | .0246 | **.9773** |
+
+nosd3_e1 beats trainext on BOTH axes at once -- 12% lower FPR and +1.1 points of
+recall. The 2-epoch arm buys a little more FPR for 1.3 points less recall and
+loses on DALLE3, demo_val and WildRF AUC, so it is not the pick.
+
+**SHIPPED: `pe-core-l__linear__aigcmodern_nosd3_e1.pt` at threshold 0.985**,
+now the default in `predict.py`, `demo/server.py` and `main.py predict`.
+
+```
+uv run main.py train-head-views --backbone pe-core-l --with-chains   --val-sample-rows 2000 --train-manifest train-ext   --extra-train-manifest sid-real unsplash-real nano-banana midjourney-v6   --balance --epochs 1 --out models/pe-core-l__linear__aigcmodern_nosd3_e1.pt
+```
+
+### The audit could not have caught this
+
+`audit_data.load_source_frames` globbed `data/raw/` only, so every corpus added
+after it -- all of `aigc_ext/` and `real_ext/` -- was never probed. The audit
+reported nothing wrong by not looking. Fixed: `AUDIT_DIRS` now spans raw,
+aigc_ext and real_ext, and a new corpus dir must be added there. Post-fix pooled
+blind probe 0.5829 PASS; report in `reports/audit_data_2026-08-30.txt`. Note
+single-class corpora skip the per-source probe (needs both labels) and are
+covered only by the pooled one.
+
+Third fault of this family, after the SID_Set aspect-ratio shortcut and the
+depth-map fault: **a label correlating with something other than the generator.**
+
+---
+
 ## 3. What was built
 
 ### Wave 1

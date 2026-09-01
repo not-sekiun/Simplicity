@@ -36,6 +36,19 @@ PHOTO_REAL_MANIFEST = PROCESSED_DIR / "photo_real.csv"        # union of the two
 # the reals are a TRAINING source, the test tier is EVAL ONLY, and they come
 # from the same scrape, so a low FPR here after training on wildrf_real is an
 # in-domain reading. The arm trained without it is the honest one.
+# MODERN AI generators (2024-2025), added because our AIGC half is entirely
+# GenImage-era 2022 and the remaining gap is diffusion, not GANs. Three separate
+# publishers on purpose: one dataset is one provenance, and a detector will learn
+# "this source" as readily as "this generator". DALLE3 is pulled to its own
+# manifest and HELD OUT as the modern-diffusion eval tier -- never merge it in.
+AIGC_EXT_DIR = DATA_DIR / "aigc_ext"
+NANO_BANANA_MANIFEST = PROCESSED_DIR / "nano_banana.csv"        # Gemini 2.5 Flash Image
+MIDJOURNEY_V6_MANIFEST = PROCESSED_DIR / "midjourney_v6.csv"
+# SD3_MANIFEST -- REJECTED 2026-08-30, mislabelled real photos. Quarantined
+# under data/quarantine/. See that README before ever re-adding this source.
+DALLE3_HOLDOUT_MANIFEST = PROCESSED_DIR / "dalle3_holdout.csv"  # EVAL ONLY
+AIGC_MODERN_MANIFEST = PROCESSED_DIR / "aigc_modern.csv"        # union, excludes DALLE3
+
 REAL_EXT_DIR = DATA_DIR / "real_ext"
 WILDRF_REAL_MANIFEST = PROCESSED_DIR / "wildrf_real.csv"
 WILDRF_DIR = DATA_DIR / "wildrf"

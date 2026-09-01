@@ -59,3 +59,6 @@ data/train_ext/**
 !data/demo_val/demo_val.csv
 !data/train_ext/*.csv
 !data/raw/tiny_genimage_index.csv
+
+# Voice memos / scratch audio (kept locally, never committed)
+*.mp3

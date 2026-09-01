@@ -1,0 +1,19 @@
+generator,family,era,recall,n
+ADM,diffusion,2021,0.471545,123
+BigGAN,gan,2019,0.982456,114
+CycleGAN,gan,2017,0.940171,117
+DALLE2,diffusion,2022,0.572519,131
+GLIDE,diffusion,2021,0.830189,106
+GauGAN,gan,2019,1.0,122
+Midjourney,diffusion,2022,0.694215,121
+ProGAN,gan,2018,1.0,88
+SD14,diffusion,2022,0.97541,122
+SD15,diffusion,2022,0.991071,112
+SDXL,diffusion,2023,0.991935,124
+StarGAN,gan,2018,0.969697,132
+StyleGAN,gan,2019,0.984127,126
+StyleGAN2,gan,2020,0.980952,105
+VQDM,diffusion,2022,0.973214,112
+WhichFaceIsReal,gan,2019,1.0,124
+Wukong,diffusion,2022,0.983471,121
+DALLE3 (held out),diffusion,2023,0.992,1500

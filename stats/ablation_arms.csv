@@ -1,0 +1,50 @@
+arm,tier,metric,value
+trainext (previous),wildrf,matched_threshold,0.957352
+trainext (previous),ood,clean_auc,0.997772
+trainext (previous),wildrf,clean_auc,0.9945
+trainext (previous),demo_val,clean_auc,0.999483
+trainext (previous),dalle3,recall_at_matched_fpr,0.962667
+trainext (previous),dalle3,recall_18view_at_matched_fpr,0.87437
+trainext (previous),ood,recall_at_matched_fpr,0.9185
+"+modern, with SD3",wildrf,matched_threshold,0.978758
+"+modern, with SD3",ood,clean_auc,0.995033
+"+modern, with SD3",wildrf,clean_auc,0.99537
+"+modern, with SD3",demo_val,clean_auc,0.999774
+"+modern, with SD3",dalle3,recall_at_matched_fpr,0.988
+"+modern, with SD3",dalle3,recall_18view_at_matched_fpr,0.926074
+"+modern, with SD3",ood,recall_at_matched_fpr,0.8315
+"+modern, SD3 removed",wildrf,matched_threshold,0.994302
+"+modern, SD3 removed",ood,clean_auc,0.998023
+"+modern, SD3 removed",wildrf,clean_auc,0.995992
+"+modern, SD3 removed",demo_val,clean_auc,0.999706
+"+modern, SD3 removed",dalle3,recall_at_matched_fpr,0.980667
+"+modern, SD3 removed",dalle3,recall_18view_at_matched_fpr,0.920667
+"+modern, SD3 removed",ood,recall_at_matched_fpr,0.8405
+11 views (previous ship),wildrf,matched_threshold,0.986167
+11 views (previous ship),ood,clean_auc,0.997851
+11 views (previous ship),wildrf,clean_auc,0.996931
+11 views (previous ship),demo_val,clean_auc,0.999881
+11 views (previous ship),dalle3,recall_at_matched_fpr,0.988667
+11 views (previous ship),dalle3,recall_18view_at_matched_fpr,0.943704
+11 views (previous ship),ood,recall_at_matched_fpr,0.8825
+22 views (all transforms),wildrf,matched_threshold,0.987942
+22 views (all transforms),ood,clean_auc,0.997647
+22 views (all transforms),wildrf,clean_auc,0.996485
+22 views (all transforms),demo_val,clean_auc,0.999882
+22 views (all transforms),dalle3,recall_at_matched_fpr,0.984667
+22 views (all transforms),dalle3,recall_18view_at_matched_fpr,0.941519
+22 views (all transforms),ood,recall_at_matched_fpr,0.8675
+"SHIPPED (19 views, 1 epoch)",wildrf,matched_threshold,0.979712
+"SHIPPED (19 views, 1 epoch)",ood,clean_auc,0.998171
+"SHIPPED (19 views, 1 epoch)",wildrf,clean_auc,0.996926
+"SHIPPED (19 views, 1 epoch)",demo_val,clean_auc,0.999924
+"SHIPPED (19 views, 1 epoch)",dalle3,recall_at_matched_fpr,0.992
+"SHIPPED (19 views, 1 epoch)",dalle3,recall_18view_at_matched_fpr,0.957963
+"SHIPPED (19 views, 1 epoch)",ood,recall_at_matched_fpr,0.899
+"same, 2 epochs (rejected)",wildrf,matched_threshold,0.98603
+"same, 2 epochs (rejected)",ood,clean_auc,0.997994
+"same, 2 epochs (rejected)",wildrf,clean_auc,0.996008
+"same, 2 epochs (rejected)",demo_val,clean_auc,0.999823
+"same, 2 epochs (rejected)",dalle3,recall_at_matched_fpr,0.988667
+"same, 2 epochs (rejected)",dalle3,recall_18view_at_matched_fpr,0.941815
+"same, 2 epochs (rejected)",ood,recall_at_matched_fpr,0.88

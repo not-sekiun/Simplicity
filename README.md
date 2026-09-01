@@ -4,43 +4,50 @@ Robust detection of AI-generated images under real-world redistribution —
 JPEG re-encoding, blur, thumbnail resize, sensor noise, color jitter,
 center-cropping, and realistic chains of those. Solo submission.
 
-> **Numbers in this README are current, not final.** The shipping head is
-> trained on 6,000 of the 23,800 available training images (25% of the
-> pool) — a full-pool retrain is in progress and expected to move the
-> headline OOD score by roughly +0.015–0.025 (see [Status](#status) and
-> [HANDOFF.md](HANDOFF.md)). The **backbone choice (`pe-core-l`) is
-> locked** — decided by a controlled race against two challengers on a
-> held-out OOD benchmark, see [Model](#model-frozen-backbone--linear-probe)
-> — but the **checkpoint it ships with will be replaced** as more training
-> data lands. Re-run `error-analysis` / `eval-grid` after that to refresh
-> this file's tables.
+**Shipping head:** `models/pe-core-l__linear__allsev_e1.pt` at threshold
+**0.980**. A frozen 316M-parameter vision backbone plus a **1,025-parameter
+linear probe** — the backbone is never fine-tuned.
+
+| tier | n | clean AUC | transformed (17-view mean) |
+|---|---|---|---|
+| `demo_val` — the brief's §5.4 benchmark | 13,843 | **0.9999** | 0.9960 |
+| `ood` — 10 generators absent from training | 8,200 | **0.9982** | 0.9724 |
+| `wildrf_test` — real Reddit/X/Facebook photos | 2,503 | **0.9969** | 0.9875 |
+| `dalle3_holdout` — a modern generator held out entirely | 1,500 | **0.9988** | 0.9917 |
+
+On real social-media photographs at the shipping threshold: **FPR 2.15% at TPR
+97.97%**, measured on a held-out split of WildRF. The threshold is derived, not
+chosen — `scripts/derive_threshold.py` holds the protocol as code.
 
 ## Status
 
+Feature-complete. Every §5.5 deliverable is implemented and reported.
+
 | Piece | State |
 |---|---|
-| Data pipeline (download, index, split, 3 held-out eval tiers) | done |
+| Data pipeline (download, index, split, 6 held-out eval tiers) | done |
 | Robustness transform pipeline (brief's exact 5.2 table + 3 realistic chains) | done |
-| Shortcut audit (blind-probe canary) | done — caught and removed two label shortcuts, see [FINDINGS.md](FINDINGS.md) |
+| Shortcut audit (blind-probe canary over every corpus directory) | done — caught **three** mislabelled corpora, see [FINDINGS.md](FINDINGS.md) |
 | Frozen-backbone + linear-probe model pipeline | done |
-| Backbone race (`pe-core-l` vs `dinov3-l` vs `metaclip2-h`) | **done — `pe-core-l` wins**, see [Model](#model-frozen-backbone--linear-probe) |
+| Backbone race (`pe-core-l` vs `dinov3-l` vs `metaclip2-h`) | done — **`pe-core-l` wins** |
 | Inference script, `{image_path, pred}` JSON (deliverable 5.5.2) | done — `predict.py` |
-| Robustness evaluation summary, 18 views (deliverable 5.5.4) | done — `main.py eval-grid` |
-| Error analysis: concrete false positives/negatives (deliverable 5.5.5) | done — `main.py error-analysis` |
-| Full-pool retrain (25% → 100% of training images) | **in progress**, largest known remaining lever |
-| Cross-generator training slice (`data/train_ext/`, 9 unseen generators) | **in progress** |
-| `metaclip2-giant` backbone (legal, registered) | blocked on a micro-batching change, deprioritized — see [HANDOFF.md](HANDOFF.md) §0 |
+| Robustness evaluation summary, 18 views x 4 tiers (deliverable 5.5.4) | done — `main.py eval-grid`, `stats/robustness_summary.csv` |
+| Error analysis: false positives/negatives (deliverable 5.5.5) | done — `main.py error-analysis` |
+| Modern-generator training data + a held-out modern generator | done — see [Data](#data) |
+| Presentation stats + charts | done — [`stats/`](stats/README.md) |
+| `metaclip2-giant` backbone (legal, registered) | not pursued — blocked on a micro-batching change, deprioritized |
 
-Full state, open jobs, and the reasoning behind every decision above:
-**[HANDOFF.md](HANDOFF.md)** (start there for anyone picking this project
-back up) → [NARRATIVE.md](NARRATIVE.md) (numbered experiment log) →
-[FINDINGS.md](FINDINGS.md) (forensic detail on data shortcuts and traps).
+Full state and reasoning: **[HANDOFF.md](HANDOFF.md)** (start here) →
+[NARRATIVE.md](NARRATIVE.md) (numbered experiment log) →
+[FINDINGS.md](FINDINGS.md) (forensic detail on data faults) →
+[DEMO.md](DEMO.md) (the demo/pitch script).
 
-> ⚠ **A high AUC on this project is evidence of a leak, not success.**
-> Two label shortcuts were found and removed from the training data (see
-> [FINDINGS.md](FINDINGS.md) §1) — always cross-check any headline number
-> against the out-of-distribution tier described below, not just clean
-> validation accuracy.
+> **A high AUC on this project is evidence of a leak until proven otherwise.**
+> Three separate corpora reached training mislabelled — depth maps as
+> photographs, GAN faces as real, and real photographs as SD3 output. None was
+> caught by a metric; all three were caught by scoring the corpus or looking at
+> the pixels. Cross-check any headline number against `ood`, `wildrf_test` and
+> `dalle3_holdout`, never clean validation alone.
 
 ## How this solution addresses the problem statement
 
@@ -52,10 +59,10 @@ back up) → [NARRATIVE.md](NARRATIVE.md) (numbered experiment log) →
   Prevails* (arXiv:2602.01738), whose whole thesis is that this recipe is
   both simpler and more robust than task-specific architectures.
 - **Robustness is trained for, not hoped for.** The brief's transform table
-  (5.2) is implemented exactly and used two ways: as a *stochastic*
-  augmentation during training (so the probe sees degraded inputs, not just
-  clean ones) and as a *deterministic* 18-view grid at eval time (so
-  robustness is measured per transform, per severity, not averaged away).
+  (5.2) is implemented exactly. Every view is **fixed and deterministic** — the
+  head trains on 11 named views and is scored on a disjoint-where-it-matters
+  18-view grid, so robustness is measured per transform, per severity, never
+  averaged away.
 - **Composition, not just single transforms.** A real repost has usually
   been through several transforms at once (filtered, resized, re-uploaded).
   Three chained views (`chain_light/medium/heavy`) test that directly and
@@ -88,8 +95,8 @@ CUDA wheel only resolves inside the uv environment.
 
 ## Quick start: run inference on your own images
 
-This is the required deliverable (5.5.2) — a script that takes a directory
-of images and emits a confidence score per image.
+This is the required deliverable (5.5.2) — a script that takes a directory of
+images and emits a confidence score per image.
 
 ```bash
 uv run python predict.py --input_dir path/to/images --output preds.json
@@ -102,17 +109,16 @@ POSIX-relative path:
 
 ```json
 [
-  {"image_path": "cat.jpg", "pred": 0.0421},
-  {"image_path": "subfolder/generated.png", "pred": 0.9731}
+  {"image_path": "cat.jpg", "pred": 0.0002},
+  {"image_path": "subfolder/generated.png", "pred": 0.9999}
 ]
 ```
 
-`pred` is `P(AIGC)` in `[0, 1]` — closer to 1 means more likely
-AI-generated. Recurses subdirectories; accepts jpg/jpeg/png/webp/bmp;
-unreadable files are skipped with a warning rather than crashing the run.
-No `--head` needed — it defaults to the current shipping checkpoint
-(`models/pe-core-l__linear__augchain.pt`); pass `--head <path>` to score
-with a different one (e.g. after the full-pool retrain finishes).
+`pred` is `P(AIGC)` in `[0, 1]` — closer to 1 means more likely AI-generated.
+Recurses subdirectories; accepts jpg/jpeg/png/webp/bmp; unreadable files are
+skipped with a warning rather than crashing the run. No `--head` needed — it
+defaults to the shipping checkpoint. The run also prints how many images cleared
+the decision threshold (0.980), which is the number a deployment would act on.
 
 ## Model: frozen backbone + linear probe
 
@@ -153,65 +159,75 @@ on `0.5·AUC_clean + 0.5·AUC_robust(pooled)`):
 | `dinov3-l` | 0.9041 | −0.0325 |
 | `metaclip2-h` | 0.8961 | −0.0405 |
 
+> **These are race-era absolute numbers and are not comparable to the tables
+> elsewhere in this README.** The race predates both the `WhichFaceIsReal` label
+> correction (which alone moved ood clean AUC 0.9670 → 0.9961) and the extended
+> training pool. All three arms raced under identical conditions, so the
+> *ordering* is valid and is what the decision rested on; the absolute values
+> have since been superseded across the board.
+
 Same ordering held on the in-scope diffusion-only metric, on worst-case
 AUC, and on clean val. Full protocol and race artifacts:
 [HANDOFF.md](HANDOFF.md) §§1–2, `reports/race/`.
 
 ## Data
 
-**Training pool: [`TheKernel01/Tiny-GenImage`](https://huggingface.co/datasets/TheKernel01/Tiny-GenImage) only** —
-7 generators (ADM, BigGAN, GLIDE, Midjourney, SD1.5, VQDM, Wukong) + real
-images, content-matched real/fake pairs. `train.csv` (23,800 rows) /
-`val.csv` (4,200 rows), stratified 85/15.
+**Training pool: 41,919 images.** Deliberately assembled from several
+independent sources, because one dataset is one provenance and a detector will
+learn "this source" as readily as "this generator".
 
-**CIFAKE and SID_Set (both listed in the brief's dataset options) were
-evaluated and dropped from training.** SID_Set carries a composition
-shortcut — its real and AI halves are separable at 0.93 balanced accuracy
-from an 8×8 greyscale thumbnail alone, and a head trained on it transfers
-to CIFAKE at chance. CIFAKE measured as actively harmful once mixed in.
-Full forensics: [FINDINGS.md](FINDINGS.md) §§1, 2d. This is a documented,
-deliberate scope decision, not missing work — the brief permits choosing
-among its listed datasets and states them as options, not requirements.
+| corpus | n | role |
+|---|---|---|
+| `train_ext` | 30,919 | Tiny-GenImage's 7 generators + 6 more, plus ImageNet-register reals |
+| SID_Set reals | 4,000 | real photographs, OpenImages register |
+| Unsplash | 4,000 | curated photography — a real domain ImageNet does not cover |
+| Midjourney v6 | 1,500 | **modern generator (2024)**, art/illustration register |
+| nano-banana | 1,500 | **modern generator (2025)**, Gemini 2.5 Flash Image |
+
+**Adding real-image domains beat adding generators, three times running.**
++SID_Set reals +Unsplash took WildRF false positives from 33.0% to 18.3% at
+unchanged recall, with no modelling change at all. Generator-side data only
+started paying once the generators were ones we were actually failing on — the
+two modern corpora above — which is exactly what the DALL·E 3 holdout confirms.
+
+**CIFAKE was evaluated and dropped**; it measured as actively harmful once mixed
+in. **SID_Set's paired real/fake split was also dropped** — its halves are
+separable at 0.93 balanced accuracy from an 8x8 greyscale thumbnail alone. Its
+*real* half was later re-added on its own as a real-domain corpus, once the
+aspect-preserving resize + square crop in `transforms.py` closed the shortcut
+the pairing exposed. Full forensics: [FINDINGS.md](FINDINGS.md).
+
+**One corpus is quarantined, not deleted.** `gmongaras/Stable_Diffusion_3_Recaption`
+is a *recaptioning* dataset — real photographs with SD3-authored captions, not
+SD3 output. Training on 1,500 of them as AIGC cost DALL·E 2 recall 7 points
+before it was caught. It lives in `data/quarantine/` with the full evidence and
+is removed from the CLI so it cannot be pulled again. See
+[FINDINGS.md](FINDINGS.md) §2k.
 
 ```bash
-uv run main.py download tiny-genimage --limit-per-split 40000   # HF, streamed + capped
-uv run main.py split --val-fraction 0.15 --seed 42               # stratified train/val manifests
-uv run main.py audit-data --transform                             # shortcut audit + blind-probe canary
+uv run main.py download tiny-genimage --limit-per-split 40000
+uv run main.py split --val-fraction 0.15 --seed 42
+uv run main.py audit-data --transform     # shortcut audit over EVERY corpus dir
 ```
-
-Every downloader writes `data/raw/<source>_index.csv`
-(`image_path,label,source,generator`; label 0=real, 1=AIGC). `main.py
-split` merges every `*_index.csv` under `data/raw/` into a single
-stratified `data/processed/{train,val}.csv`. `data/` is gitignored — run
-`uv run main.py check-env` to see what's actually on disk before assuming
-anything is there.
 
 ### Evaluation tiers
 
-Four tiers, increasingly hard, **none of them ever globbed by `split`** —
-so "don't train on the eval set" is structural, not a convention that can
-be forgotten:
+Six tiers, **none of them ever globbed by `split`** — so "don't train on the
+eval set" is structural, not a convention that can be forgotten:
 
-| Tier | What it is | Discriminates? |
-|---|---|---|
-| `val` (internal, 15%) | Held-out split of the training pool, same 7 generators | No — saturated, 11/18 views ≥ 0.99 |
-| `heldout` | Tiny-GenImage's own HF "validation" split, same 7 generators, never touched during training | in-distribution sanity check only |
-| `demo-val` | The brief's self-reported benchmark (5.4): COCO val2017 (real) + WildFake "DALL·E Advanced" (AIGC). **Never trained on, never tuned against** — the brief says explicitly not to use it for training, and it doesn't score, so it's used only for periodic checkpoint sanity checks | No — saturated, 16/18 views ≥ 0.99 |
-| `ood` | A deliberately hard tier built from `TheKernel01/AIGC-Detection-Benchmark`, generator-balanced across 18 classes, **10 of which are absent from training** (5 GAN families + DALL·E 2, SD1.4, SDXL, StarGAN, WhichFaceIsReal) | **Yes — 0/18 views ≥ 0.99, range 0.81–0.95.** The only tier that can currently rank a model change |
+| Tier | n | What it is | Discriminates? |
+|---|---|---|---|
+| `val` | 4,200 | Held-out split of the training pool | No — saturated |
+| `heldout` | 7,000 | Tiny-GenImage's own validation split | in-distribution sanity only |
+| `demo_val` | 13,843 | The brief's §5.4 benchmark: COCO val2017 (4,998–5,000 real) + WildFake DALL·E Advanced (8,843 AIGC). **Never trained on, never tuned against** | No — saturated at 0.9999 |
+| `ood` | 8,200 | Generator-balanced across 18 classes, **10 absent from training** | Yes — for legacy generators |
+| `wildrf_test` | 2,503 | **Real Reddit/X/Facebook images**, already platform-re-encoded | **Yes — the tier that matters** |
+| `dalle3_holdout` | 1,500 | **DALL·E 3, held out of training entirely** | **Yes — the generalization test** |
 
-`val`/`heldout`/`demo-val` all being saturated is itself a finding worth
-stating in a write-up: on in-distribution or near-in-distribution data this
-approach is close to ceiling, and the interesting signal only shows up
-once the generator distribution actually shifts.
-
-```bash
-uv run main.py build-heldout                                 # merge heldout index
-uv run main.py download-demo coco-val2017                    # real half, auto
-uv run main.py download-demo wildfake-dalle-advanced         # AIGC half, needs a manual fetch first — see --help
-uv run main.py build-demo-val                                # merge + leakage guard
-uv run main.py download-ood --per-generator 250               # generator-balanced OOD slice
-uv run main.py build-ood                                      # merge OOD index
-```
+`dalle3_holdout` is the tier that makes the modern-generator claim falsifiable.
+Three current generators were pulled and only two trained on, so the third
+answers the question no other tier can: does this generalise to a modern model
+it has never seen, from a publisher it has never seen? It does — see below.
 
 ## Robustness pipeline
 
@@ -237,116 +253,142 @@ real detector having survived exactly one transform:
 | `chain_heavy` | blur σ1.0 → resize 0.25× → noise σ0.05 → JPEG q30 | a repost of a repost |
 
 18 evaluation views total: `clean` + 14 single-transform + 3 chained.
-Training uses a separate stochastic mix of the same table (1–2 random ops,
-random order, random severity) plus 4 training-only chains disjoint from
-the 3 scored ones, so training on composition never contaminates the
-columns that measure it.
+
+**Everything is deterministic.** Because the backbone is frozen, each image is
+decoded once and every view it needs is generated, embedded and cached — so an
+image contributes a fixed set of rows, not a fresh random draw per epoch. The
+head trains on 11 fixed views: `clean` + 6 single severities + 4 training-only
+chains (`trainchain_a..d`) that are **disjoint from the 3 scored chains**, so
+training on composition never contaminates the columns that measure it.
+
+(`RobustnessAugment` / `build_train_transform` implement a stochastic
+live-pixel augmenter. They are **not** in the training path — the only caller is
+`main.py preview-augment`, which renders a sanity-check grid.)
 
 ## Robustness evaluation (deliverable 5.5.4)
 
 ```bash
-# cache all 18 views for a seeded, label-balanced subsample (one decode per image)
 uv run main.py embed-views --backbone pe-core-l --manifest ood --sample-rows 4000
-# score the shipping head across them (no GPU work — reads the cache)
-uv run main.py eval-grid --backbone pe-core-l --manifest ood --sample-rows 4000 \
-    --head models/pe-core-l__linear__augchain.pt --by-generator
+uv run main.py eval-grid  --backbone pe-core-l --manifest ood --sample-rows 4000     --head models/pe-core-l__linear__allsev_e1.pt --by-generator
 ```
 
-Current shipping head, clean vs. transformed, on the OOD tier
-(the tier that discriminates — see [Evaluation tiers](#evaluation-tiers)):
+**One fixed threshold (0.980) applied to every view.** Re-tuning per transform is
+the standard way to make a fragile detector look robust on paper, so it is not
+done here.
 
-| view | AUC | BAcc @ fixed threshold | FPR | FNR |
-|---|---:|---:|---:|---:|
-| clean | 0.9532 | 0.9358 | 0.088 | 0.041 |
-| mean, single-transform views | 0.9219 | — | — | — |
-| mean, chained views | 0.8718 | — | — | — |
-| **chain_heavy (worst)** | **0.8099** | 0.7548 | 0.292 | 0.199 |
+| tier | clean AUC | transformed (17-view mean) | worst transform | clean BAcc | transformed BAcc |
+|---|---|---|---|---|---|
+| **demo_val** | **0.9999** | 0.9960 | 0.9641 | 0.9890 | 0.9628 |
+| **ood** | **0.9982** | 0.9724 | 0.8878 | 0.9490 | 0.8542 |
+| **wildrf_test** | **0.9969** | 0.9875 | 0.9273 | 0.9796 | 0.9518 |
+| **dalle3_holdout** | **0.9988** | 0.9917 | 0.9411 | 0.9840 | 0.9641 |
 
-`AUC_robust` (pooled over all 14 single + 3 chained views) = **0.9200** →
-`0.5·AUC_clean + 0.5·AUC_robust` = **0.9366**. Full per-view table:
-`reports/race/pe-core-l/grid_ood.csv`; console output with the
-per-generator breakdown: `reports/race/pe-core-l/run.log`.
+The worst view is `noise_sigma0.1` on three tiers and `chain_heavy` on `ood`, a
+held-out composition. Heavy noise is trained on now — the head sees every
+severity — which is why the remaining failure has moved to composition: the one
+thing left in the grid that is still genuinely unseen.
 
-**Composition compounds, it doesn't average.** `chain_heavy` scores below
-every one of its own component transforms taken alone (composition penalty
-−0.076 vs. its weakest single component) — the single-transform grid alone
-would have missed this failure mode entirely. This is the reason chained
-views are reported, not just the brief's 14 base rows.
+**Composition compounds, it doesn't average** — the axis the brief's 14-row
+table alone cannot see:
+
+| tier | single-transform mean (14) | chained mean (3) | penalty |
+|---|---|---|---|
+| ood | 0.9786 | 0.9435 | **-0.0351** |
+| wildrf_test | 0.9883 | 0.9836 | -0.0047 |
+| demo_val | 0.9958 | 0.9970 | +0.0012 |
+| dalle3_holdout | 0.9914 | 0.9932 | +0.0018 |
+
+Negative means composition costs more than any single axis. It is *positive* on
+demo_val and DALL·E 3 — there, degradation moves images toward the training
+domain, so the clean view is the outlier rather than the chains.
+
+Chart: `stats/charts/07_robustness_summary.png`. Data:
+`stats/robustness_summary.csv`, `stats/per_view_auc.csv`. The 18-view grid runs
+on a 2,000-row sample of demo_val and a 4,000-row sample of ood; full-tier clean
+AUC is unchanged.
 
 ## Error analysis (deliverable 5.5.5)
 
 ```bash
-uv run main.py error-analysis --backbone pe-core-l --manifest ood --sample-rows 4000 \
-    --head models/pe-core-l__linear__augchain.pt --top-k 8
+uv run main.py error-analysis --backbone pe-core-l --manifest ood --sample-rows 4000     --head models/pe-core-l__linear__allsev_e1.pt --top-k 8
 ```
 
-Reads the same view caches `eval-grid` uses (no extra GPU work) and, at
-**the same one fixed threshold** eval-grid reports at, writes:
-`reports/error_analysis/report__*.md` (readable summary),
-`examples__*.csv` + copied image files (the model's most confident
-mistakes, per view), and `by_generator__*.csv` (worst-collapsing
-generators first). Findings from the current shipping head on `ood`:
+**False positives — real photographs wrongly flagged.** Measured on WildRF's
+clean view, by platform:
 
-- **The single largest generator-level collapse is `DALLE2`** (unseen,
-  diffusion, in scope): clean AUC 0.928 → 0.802 pooled-degraded, a 12.6-point
-  drop — the largest of any generator (next: `StyleGAN`, a GAN, at 8.6
-  points; the next diffusion generator is `ADM` at 3.3 points). Its
-  most-missed images are the highest-confidence false negatives in the
-  whole set (`pred` as low as 0.0015 for an actual AIGC image).
-- **Unseen diffusion generators otherwise generalize well** — SD1.4 (0.958)
-  and SDXL (0.955) beat even *trained* generators like ADM (0.921) and
-  Midjourney (0.930). GAN families did not collapse either (mean clean GAN
-  AUC 0.964 > mean clean diffusion 0.947, and the same ordering holds
-  degraded) — there is no GAN-specific weakness to fix,
-  and DALLE2 looks like a genuine style outlier rather than a
-  seen/unseen effect in general.
-- **Errors skew toward false positives under degradation.** Going from
-  `clean` to `chain_heavy`, FPR moves +0.20 and FNR moves +0.16 — heavy
-  degradation makes the model more likely to flag *real* images as AIGC
-  than to miss actual fakes. For a deployment that penalizes false
-  accusations against real users, this is the direction that matters most
-  to calibrate against.
-- **A specific false-positive cluster**: every top false positive on both
-  `clean` and `chain_heavy` comes from `WhichFaceIsReal` (a real-photo
-  benchmark for a human-perception task, labeled `real` here) — the head
-  flags these portraits as AIGC with confidence 1.0000 regardless of
-  transform. This is a real, unresolved generalization gap worth a
-  dedicated future look, not fixable by more robustness augmentation.
+| | Facebook | Reddit | Twitter | overall FPR | TPR |
+|---|---|---|---|---|---|
+| at 0.50 | 36.3% | 14.3% | 22.6% | 19.3% | 99.5% |
+| **at 0.980 (shipping)** | 5.6% | 0.8% | 4.4% | **2.4%** | **98.3%** |
 
-## Trade-offs & limitations
+This is a *calibration* gap, not a representation one — the ranking stays intact
+(AUC 0.9969), the scores just shift. Which is why the threshold is 0.980 and not
+0.5: an ~8x reduction in false accusations for 1.2 points of recall. Telling
+someone their own photograph is fake costs far more than missing one AI image.
+The threshold is derived on a **held-out** WildRF split (split by image, swept in
+0.005 steps, F1-optimal on one half, reported on the other): **FPR .0215 / TPR
+.9797**. That protocol is `scripts/derive_threshold.py`, and its `--verify` mode
+asserts it still reproduces the table it was first recorded from.
 
-- **Numbers above are provisional.** The shipping head trains on 6,000 of
-  23,800 available training images; a learning-curve check found the OOD
-  score still rising at that point (+0.022 from 3,000 → 6,000 images), so a
-  full-pool retrain is expected to move every table in this README before
-  final submission. See [HANDOFF.md](HANDOFF.md) §0 for the live status.
-- **One fixed threshold, chosen on clean, used everywhere.** This is a
-  deliberate choice — re-tuning per transform is the standard way to make a
-  fragile detector look robust on paper (AUC can look fine while accuracy
-  at any real operating point collapses) — but it means the FPR/FNR numbers
-  above are specific to that one operating point; shifting it trades false
-  accusations of real content against missed fakes, and which side to favor
-  is a deployment decision this project doesn't make on its own.
-- **`ood` is a synthetic proxy for "unknown future generators," not a
-  guarantee.** It's the best generalization signal available at hackathon
-  scale, but n≈4,000 (per-view SE ≈0.005–0.008) and its own generator mix
-  is still finite; a genuinely novel generator family could behave
-  differently again.
-- **The DALLE2 collapse and the WhichFaceIsReal false-positive cluster
-  (above) are both unresolved.** Given more time: (1) fold a small amount
-  of DALL·E-family data into training via the `data/train_ext/` slice
-  already being pulled (9 generators absent from the current pool), (2)
-  investigate the WhichFaceIsReal cluster specifically rather than assuming
-  it's covered by generic robustness training, (3) calibrate per-degradation
-  thresholds instead of one global one, (4) unblock `metaclip2-giant` (needs
-  micro-batched forward passes — it currently sends 18 images per forward
-  even at batch size 1, well past its throughput cliff).
-- **Frozen backbone is the whole robustness strategy.** No adversarial
-  training, no explicit forensic/frequency-domain features. This keeps the
-  system simple, fast to iterate, and inference-cheap (a single linear
-  layer at inference time — no backprop through a foundation model), but
-  it means any weakness in the backbone's own pretraining generalization
-  is directly a weakness here.
+**False negatives — and the most interesting result in the project.**
+Per-generator recall at the shipping threshold, weakest first:
+
+| generator | family | era | recall |
+|---|---|---|---|
+| ADM | diffusion | 2021 | **0.472** |
+| DALLE2 | diffusion | 2022 | **0.573** |
+| Midjourney (v4-era) | diffusion | 2022 | 0.694 |
+| GLIDE | diffusion | 2021 | 0.830 |
+| SD14 / SD15 / VQDM / Wukong | diffusion | 2022 | 0.973–0.991 |
+| SDXL | diffusion | 2023 | 0.992 |
+| **DALL·E 3 (held out)** | diffusion | **2023** | **0.992** |
+| GAN family (8 generators) | gan | 2018–21 | 0.982 mean |
+
+**Our weakest generators are the oldest; our best are the newest.** The 2022-era
+diffusion mean is 0.865 while the modern held-out generator is 0.992. That
+inversion matters more than the averages: the deployment question is not whether
+this detects four-year-old research models, it is whether it holds against what
+people use now and what ships next year.
+
+**The legacy regression is recovered.** Earlier heads bought modern-generator
+recall by giving up legacy recall (2022-era diffusion 0.859 → 0.811). Training on
+every transform severity gets it back without giving the modern gains away: the
+2022-era mean is 0.865, and held at a matched 2.5% WildRF false-positive rate,
+`ood` clean recall goes 0.883 → 0.899 against the previous head while DALL·E 3
+goes 0.944 → 0.958. The matched rate matters — recall read at two different
+thresholds is not a comparison.
+
+**Residual weaknesses, unfixed.** WildRF gains are carried by Reddit (0.8% FPR);
+Twitter (4.4%) and Facebook (5.6%) remain materially worse, and Facebook's n=160
+is directional only. The worst view on `ood` is now `chain_heavy`, a composition
+held out from training — the honest place for a failure to be, but also the
+condition a re-uploaded, re-compressed image actually meets.
+
+## Trade-offs & limitations, and what more time would buy
+
+1. **Only two modern generators in training, one held out.** The generalisation
+   claim rests on a single held-out modern generator. Three or four would make it
+   much stronger, and it is the first thing more time would buy.
+2. **Heavy noise and deep composition are the real failure modes.**
+   `noise_sigma0.1` costs 3–11 points of AUC per tier, and `chain_heavy` costs 11
+   on `ood`. Noise is trained on at every severity now, so that number is no
+   longer extrapolation; the chains still are, and they are the gap to close.
+3. **One global threshold.** Per-domain thresholds would beat one number — the
+   platform table above shows Facebook and Twitter want different operating
+   points than Reddit — and temperature calibration is unimplemented.
+4. **Legacy-generator recall regressed** at the new operating point. Deliberate,
+   but real, and stated above rather than buried.
+5. **`ood` is a synthetic proxy for "unknown future generators."** `dalle3_holdout`
+   is the genuine test and it is n=1,500 from one publisher.
+6. **Real-domain coverage remains a binding constraint.** Residual false
+   positives concentrate in photography registers the training reals do not cover.
+7. **Frozen backbone is the whole robustness strategy.** No adversarial training,
+   no frequency-domain forensics. That keeps inference to a single linear layer
+   and is why it generalises — but any weakness in the backbone's own pretraining
+   is directly a weakness here.
+8. **Compute-bound, not idea-bound.** One RTX 3080. Every ablation is a data
+   ablation because that is what fits — which, given that data work produced
+   every gain this project made, turned out to be the right constraint to have.
 
 ## Project layout
 
@@ -369,20 +411,30 @@ scripts/
   download_ood_benchmark.py      Dataset downloaders/indexers
   make_splits.py, make_heldout.py, make_demo_val.py, make_ood.py
                                   Manifest builders for each tier
-  audit_data.py                  Shortcut audit + blind-probe canary
+  audit_data.py                  Shortcut audit + blind-probe canary (every corpus dir)
+  download_aigc_modern.py        Modern-generator pulls + the DALL-E 3 holdout
+  download_real_domains.py, make_wildrf.py, make_sid_real.py, make_train_ext.py
+                                 Real-domain corpora and the extended training pool
+  train_instrumented.py          Instrumented replica of the shipping run -> stats/
+  export_eval_stats.py           Every evaluation number as tidy CSV -> stats/
+  plot_stats.py                  Renders stats/charts/*.png
   run_race.py                    Backbone race runner
 data/                           gitignored — check `main.py check-env` before assuming
   raw/ processed/ heldout/ demo_val/ ood/ embeddings/
+  aigc_ext/ real_ext/            Modern generators and real-domain corpora
+  quarantine/                    Rejected corpora + the evidence (never train on these)
 models/                         Trained head checkpoints (small — a few KB each,
                                  the backbone weights are never saved, only downloaded)
-reports/                        Robustness grids, race results, error analysis
+stats/                          Presentation data + charts (see stats/README.md)
+reports/                        Robustness grids, race results, error analysis, audit log
 ```
 
 ## Development tools & stack
 
-- Python 3.11, [uv](https://docs.astral.sh/uv/) for environment/dependency
-  management.
-- PyTorch 2.13 + torchvision (cu130 build), scikit-learn (AUC/balanced
+- Python 3.11.15, [uv](https://docs.astral.sh/uv/) for environment/dependency
+  management. Optional extras: `--extra demo` (FastAPI demo server),
+  `--extra viz` (matplotlib, for `stats/charts/`).
+- PyTorch 2.13.0+cu130 + torchvision, scikit-learn (AUC/balanced
   accuracy), pandas/numpy, Hugging Face `datasets`/`transformers`/`timm`
   for backbone loading and dataset streaming, kagglehub for one dataset
   mirror.
@@ -393,4 +445,7 @@ reports/                        Robustness grids, race results, error analysis
 
 ## Team
 
-Solo — 1010angusx@gmail.com.
+Solo submission — all work (data pipeline, model, evaluation, demo, writeups) by
+the repository owner. Claude Code was used as a coding assistant throughout;
+every experimental result reported here was produced by the committed scripts and
+is reproducible from them.
