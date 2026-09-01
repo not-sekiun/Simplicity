@@ -23,6 +23,7 @@ dependencies = [
     "huggingface-hub",
     "timm>=1.0.29",
     "transformers>=5.16.1",
+    "python-dotenv>=1.2.3",
 ]
 
 # Not part of the graded deliverables -- backs the Chrome-extension live demo
