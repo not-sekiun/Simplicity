@@ -95,8 +95,22 @@ ARMS = {  # label -> checkpoint
 }
 
 
+def resolve_ckpt(name):
+    """Locate a checkpoint by filename, in models/ or models/archive/.
+
+    Superseded ablation arms are moved to models/archive/ rather than deleted --
+    their numbers are cited in docs/findings.md, so the checkpoints stay
+    reproducible. Look in both places, or the ablation chart silently loses the
+    arms it is meant to compare against.
+    """
+    for candidate in (ROOT / "models" / name, ROOT / "models" / "archive" / name):
+        if candidate.exists():
+            return candidate
+    return ROOT / "models" / name  # non-existent; callers guard with .exists()
+
+
 def load(name):
-    ck = torch.load(ROOT / "models" / name, map_location="cpu", weights_only=False)
+    ck = torch.load(resolve_ckpt(name), map_location="cpu", weights_only=False)
     h = build_head(ck["head_kind"], ck["in_dim"])
     h.load_state_dict(ck["state_dict"])
     h.eval()
@@ -192,7 +206,7 @@ def main() -> None:
     # 5. the ablation, at a matched false-positive rate -----------------------
     arows = []
     for label, ckname in ARMS.items():
-        if not (ROOT / "models" / ckname).exists():
+        if not resolve_ckpt(ckname).exists():
             print(f"[eval-stats] skipping missing arm: {ckname}")
             continue
         hh, mm, ss = load(ckname)
