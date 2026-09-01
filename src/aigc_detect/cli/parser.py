@@ -116,7 +116,18 @@ from __future__ import annotations
 
 import argparse
 
-from aigc_detect.cli import audit, datasets, embed, env, evaluate, manifests, predict, preview, train
+from aigc_detect.cli import (
+    audit,
+    cache,
+    datasets,
+    embed,
+    env,
+    evaluate,
+    manifests,
+    predict,
+    preview,
+    train,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -141,6 +152,7 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.register_error_analysis(sub)
     train.register_train_head(sub)
     predict.register_predict(sub)
+    cache.register_cache(sub)
 
     return parser
 
