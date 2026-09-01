@@ -34,11 +34,11 @@ import torch
 from sklearn.metrics import roc_auc_score
 
 from aigc_detect.config import GENERATOR_FAMILY, RANDOM_SEED, ROOT_DIR, TRAIN_GENERATORS
-from aigc_detect.embed import fingerprint_paths
-from aigc_detect.embed_views import cache_stem, load_view_cache, select_rows, view_embeddings_path
-from aigc_detect.eval_grid import best_balanced_threshold
-from aigc_detect.heads import build_head
-from aigc_detect.transforms import build_robustness_views, eval_view_names
+from aigc_detect.data.transforms import build_robustness_views, eval_view_names
+from aigc_detect.embed.embeddings import fingerprint_paths
+from aigc_detect.embed.views import cache_stem, load_view_cache, select_rows, view_embeddings_path
+from aigc_detect.evaluation.grid import best_balanced_threshold
+from aigc_detect.registry.heads import build_head
 
 
 def _resolve_image_path(raw_path: str) -> Path:

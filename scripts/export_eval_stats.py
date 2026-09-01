@@ -23,7 +23,6 @@ Outputs (CSV, under stats/):
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -31,18 +30,16 @@ import pandas as pd
 import torch
 from sklearn.metrics import roc_auc_score
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
-
-from aigc_detect.config import (  # noqa: E402
+from aigc_detect.config import (
     DEMO_VAL_MANIFEST,
     EMBEDDINGS_DIR,
     OOD_MANIFEST,
     WILDRF_TEST_MANIFEST,
 )
-from aigc_detect.embed_views import eval_view_names, select_rows, train_chain_view_names  # noqa: E402
-from aigc_detect.heads import build_head  # noqa: E402
+from aigc_detect.embed.views import eval_view_names, select_rows, train_chain_view_names
+from aigc_detect.registry.heads import build_head
 
+ROOT = Path(__file__).resolve().parents[1]
 STATS_DIR = ROOT / "stats"
 BACKBONE = "pe-core-l"
 SHIP = "pe-core-l__linear__allsev_e1.pt"

@@ -69,15 +69,15 @@ from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-from aigc_detect.backbones import load_backbone
 from aigc_detect.config import EMBEDDINGS_DIR, RANDOM_SEED, ROOT_DIR
-from aigc_detect.dataset import ManifestImageDataset
-from aigc_detect.embed import fingerprint_paths
-from aigc_detect.transforms import (
+from aigc_detect.data.dataset import ManifestImageDataset
+from aigc_detect.data.transforms import (
     build_robustness_views,
     eval_view_names,
     train_chain_view_names,
 )
+from aigc_detect.embed.embeddings import fingerprint_paths
+from aigc_detect.registry.backbones import load_backbone
 
 # Bumped only if the *seeding scheme* changes. Folded into the fingerprint of
 # stochastic views only -- a deterministic view's output does not depend on it,

@@ -35,16 +35,13 @@ import argparse
 import collections
 import json
 import os
-import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from PIL import Image
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from aigc_detect import config as C  # noqa: E402
+from aigc_detect import config as C
 
 ROOT = Path(__file__).resolve().parents[1]
 

@@ -41,17 +41,15 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 import numpy as np
 import torch
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
+from aigc_detect.config import EMBEDDINGS_DIR
+from aigc_detect.registry.heads import build_head
 
-from aigc_detect.config import EMBEDDINGS_DIR  # noqa: E402
-from aigc_detect.heads import build_head  # noqa: E402
+ROOT = Path(__file__).resolve().parents[1]
 
 # The pool the threshold is chosen over. Kept in sync by hand with
 # export_eval_stats.CDN_VIEWS and the comment on predict.DECISION_THRESHOLD.

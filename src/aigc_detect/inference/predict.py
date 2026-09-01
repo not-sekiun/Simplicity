@@ -13,7 +13,7 @@ embed.py's pipeline exactly:
   1. Read the backbone key from the checkpoint's "backbone" field (never
      hardcode it -- a checkpoint trained on a different backbone than assumed
      would silently produce plausible-looking garbage scores).
-  2. Load that backbone via `aigc_detect.backbones.load_backbone`, which
+  2. Load that backbone via `aigc_detect.registry.backbones.load_backbone`, which
      reports the backbone's OWN native_res and norm_mean/norm_std. These are
      per-backbone (PE-Core-L is 336px / 0.5,0.5,0.5; others differ) --
      config.IMAGE_SIZE and config.NORM_MEAN are ImageNet defaults for a
@@ -49,9 +49,9 @@ from PIL import Image, UnidentifiedImageError
 from torch.utils.data import DataLoader, Dataset
 from torchvision.transforms import v2
 
-from aigc_detect.backbones import load_backbone
-from aigc_detect.heads import build_head
-from aigc_detect.transforms import build_backbone_transform
+from aigc_detect.data.transforms import build_backbone_transform
+from aigc_detect.registry.backbones import load_backbone
+from aigc_detect.registry.heads import build_head
 
 # Case-insensitive; brief doesn't specify tiff/gif so kept to the common web set.
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".bmp")

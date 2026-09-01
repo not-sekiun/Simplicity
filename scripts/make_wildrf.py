@@ -36,14 +36,11 @@ Usage:
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from aigc_detect.config import DATA_DIR, LABEL_AIGC, LABEL_REAL, PROCESSED_DIR  # noqa: E402
+from aigc_detect.config import DATA_DIR, LABEL_AIGC, LABEL_REAL, PROCESSED_DIR
 
 WILDRF_DIR = DATA_DIR / "real_ext" / "WildRF"
 TRAIN_OUT = PROCESSED_DIR / "wildrf_real.csv"

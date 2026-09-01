@@ -40,11 +40,8 @@ import sys
 import time
 import traceback
 from datetime import UTC, datetime, timezone
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from aigc_detect.config import (  # noqa: E402
+from aigc_detect.config import (
     OOD_MANIFEST,
     RANDOM_SEED,
     ROOT_DIR,
@@ -98,9 +95,9 @@ def _save_status(status: dict) -> None:
 
 
 def run_backbone(key: str, status: dict, skip_embed: bool = False) -> None:
-    from aigc_detect.embed_views import cache_stem, precompute_view_embeddings
-    from aigc_detect.eval_grid import evaluate_grid
-    from aigc_detect.train_head import TRAIN_VIEWS_WITH_CHAINS, train_head_on_views
+    from aigc_detect.embed.views import cache_stem, precompute_view_embeddings
+    from aigc_detect.evaluation.grid import evaluate_grid
+    from aigc_detect.train.probe import TRAIN_VIEWS_WITH_CHAINS, train_head_on_views
 
     out_dir = RACE_DIR / key
     out_dir.mkdir(parents=True, exist_ok=True)

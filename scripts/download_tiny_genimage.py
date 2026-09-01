@@ -53,12 +53,9 @@ from __future__ import annotations
 
 import argparse
 import csv
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from aigc_detect.config import HELDOUT_DIR, LABEL_AIGC, LABEL_REAL, RAW_DIR  # noqa: E402
+from aigc_detect.config import HELDOUT_DIR, LABEL_AIGC, LABEL_REAL, RAW_DIR
 
 TINY_GENIMAGE_HF_HANDLE = "TheKernel01/Tiny-GenImage"
 

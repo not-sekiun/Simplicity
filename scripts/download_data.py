@@ -29,12 +29,9 @@ from __future__ import annotations
 
 import argparse
 import csv
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from aigc_detect.config import LABEL_AIGC, LABEL_REAL, RAW_DIR  # noqa: E402
+from aigc_detect.config import LABEL_AIGC, LABEL_REAL, RAW_DIR
 
 CIFAKE_KAGGLE_HANDLE = "birdy654/cifake-real-and-ai-generated-synthetic-images"
 SID_SET_HF_HANDLE = "saberzl/SID_Set"

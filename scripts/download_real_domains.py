@@ -38,14 +38,11 @@ from __future__ import annotations
 
 import argparse
 import io
-import sys
 from pathlib import Path
 
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from aigc_detect.config import DATA_DIR, LABEL_REAL, PROCESSED_DIR  # noqa: E402
+from aigc_detect.config import DATA_DIR, LABEL_REAL, PROCESSED_DIR
 
 REAL_EXT_DIR = DATA_DIR / "real_ext"
 

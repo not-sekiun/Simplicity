@@ -36,11 +36,8 @@ Or directly:
 from __future__ import annotations
 
 import argparse
-import sys
 from collections import Counter
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import numpy as np
 import pandas as pd
@@ -169,7 +166,7 @@ def run_blind_probe(records: list[tuple[Path, int]], seed: int, use_transform: b
 
     transform = None
     if use_transform:
-        from aigc_detect.transforms import build_eval_transform
+        from aigc_detect.data.transforms import build_eval_transform
 
         transform = build_eval_transform()
 

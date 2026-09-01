@@ -41,14 +41,11 @@ from __future__ import annotations
 
 import argparse
 import subprocess
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+import pandas as pd
 
-import pandas as pd  # noqa: E402
-
-from aigc_detect.config import (  # noqa: E402
+from aigc_detect.config import (
     DATA_DIR,
     OOD_MANIFEST,
     ROOT_DIR,
@@ -136,7 +133,7 @@ def run_job(job: str) -> None:
                 **TRAIN_EXT_PULL,
             )
     elif job.startswith("embed:"):
-        from aigc_detect.train_head import TRAIN_VIEWS_WITH_CHAINS
+        from aigc_detect.train.probe import TRAIN_VIEWS_WITH_CHAINS
 
         target = job.split(":", 1)[1]
         # A TRAINING manifest only needs the 11 views the head actually trains

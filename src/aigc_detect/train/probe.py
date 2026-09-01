@@ -28,8 +28,8 @@ from aigc_detect.config import (
     TRAIN_MANIFEST,
     VAL_MANIFEST,
 )
-from aigc_detect.heads import build_head
-from aigc_detect.transforms import eval_view_names, train_chain_view_names
+from aigc_detect.data.transforms import eval_view_names, train_chain_view_names
+from aigc_detect.registry.heads import build_head
 
 
 def _load_npz(path: Path):
@@ -50,7 +50,7 @@ def _assert_fresh(npz_path: Path, manifest_path: Path, tag: str) -> None:
     downstream metric would be wrong but plausible."""
     import numpy as _np
 
-    from aigc_detect.embed import manifest_fingerprint
+    from aigc_detect.embed.embeddings import manifest_fingerprint
 
     with _np.load(npz_path, allow_pickle=True) as d:
         cached = str(d["manifest_fingerprint"]) if "manifest_fingerprint" in d else None
@@ -208,9 +208,9 @@ def train_head_on_views(
     -- which would be indistinguishable from the domain-coverage effect these
     runs are meant to measure (FINDINGS 2h).
     """
-    from aigc_detect.embed import fingerprint_paths
-    from aigc_detect.embed_views import load_view_cache, select_rows
-    from aigc_detect.transforms import build_robustness_views
+    from aigc_detect.data.transforms import build_robustness_views
+    from aigc_detect.embed.embeddings import fingerprint_paths
+    from aigc_detect.embed.views import load_view_cache, select_rows
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 

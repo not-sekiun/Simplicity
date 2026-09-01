@@ -41,14 +41,11 @@ from __future__ import annotations
 
 import argparse
 import io
-import sys
 from pathlib import Path
 
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from aigc_detect.config import DATA_DIR, LABEL_AIGC, PROCESSED_DIR  # noqa: E402
+from aigc_detect.config import DATA_DIR, LABEL_AIGC, PROCESSED_DIR
 
 AIGC_EXT_DIR = DATA_DIR / "aigc_ext"
 AIGC_MODERN_MANIFEST = PROCESSED_DIR / "aigc_modern.csv"

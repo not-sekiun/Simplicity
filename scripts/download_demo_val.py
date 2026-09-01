@@ -31,13 +31,10 @@ Then run `uv run main.py download-demo wildfake-dalle-advanced` to index them.
 from __future__ import annotations
 
 import csv
-import sys
 import zipfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from aigc_detect.config import DEMO_VAL_DIR, LABEL_AIGC, LABEL_REAL  # noqa: E402
+from aigc_detect.config import DEMO_VAL_DIR, LABEL_AIGC, LABEL_REAL
 
 COCO_VAL2017_URL = "http://images.cocodataset.org/zips/val2017.zip"
 COCO_VAL2017_KAGGLE_HANDLE = "xthink/coco-2017-val-images"  # same 5000 official val2017 images, faster CDN

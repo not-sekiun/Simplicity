@@ -12,13 +12,9 @@ requirements this satisfies.
 from __future__ import annotations
 
 import argparse
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
-
-from aigc_detect.config import ROOT_DIR  # noqa: E402
-from aigc_detect.predict import run_inference  # noqa: E402
+from aigc_detect.config import ROOT_DIR
+from aigc_detect.inference.predict import run_inference
 
 # Keep in sync with main.py and demo/server.py -- this is the graded 5.5.2
 # entry point, so a stale default here scores the submission with the wrong head.

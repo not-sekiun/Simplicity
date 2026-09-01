@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from collections import deque
 from pathlib import Path
 
@@ -42,10 +41,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
-
-from aigc_detect.config import (  # noqa: E402
+from aigc_detect.config import (
     EMBEDDINGS_DIR,
     LABEL_AIGC,
     MIDJOURNEY_V6_MANIFEST,
@@ -56,17 +52,18 @@ from aigc_detect.config import (  # noqa: E402
     UNSPLASH_REAL_MANIFEST,
     VAL_MANIFEST,
 )
-from aigc_detect.embed import fingerprint_paths  # noqa: E402
-from aigc_detect.embed_views import (  # noqa: E402
+from aigc_detect.data.transforms import build_robustness_views
+from aigc_detect.embed.embeddings import fingerprint_paths
+from aigc_detect.embed.views import (
     eval_view_names,
     load_view_cache,
     select_rows,
     train_chain_view_names,
 )
-from aigc_detect.heads import build_head  # noqa: E402
-from aigc_detect.train_head import _grid_auc  # noqa: E402
-from aigc_detect.transforms import build_robustness_views  # noqa: E402
+from aigc_detect.registry.heads import build_head
+from aigc_detect.train.probe import _grid_auc
 
+ROOT = Path(__file__).resolve().parents[1]
 STATS_DIR = ROOT / "stats"
 
 # Width of the plotted trailing-mean window, in steps (~2.8% of an epoch here).

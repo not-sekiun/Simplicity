@@ -43,7 +43,7 @@ Subcommands:
                                       (e.g. aspect ratio). --transform runs the probe on
                                       build_eval_transform() tensors instead of raw images.
     list-backbones                   List registered frozen-backbone keys (see
-                                      src/aigc_detect/backbones.py).
+                                      src/aigc_detect/registry/backbones.py).
     embed --backbone KEY --manifest {train,val,demo-val} [--force] [--limit N]
                                       Precompute + cache pooled embeddings for a manifest
                                       under data/embeddings/. Implements the "Simplicity
@@ -119,9 +119,7 @@ import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
-
-from aigc_detect.config import (  # noqa: E402
+from aigc_detect.config import (
     AIGC_MODERN_MANIFEST,
     DALLE3_HOLDOUT_MANIFEST,
     DEMO_VAL_DIR,
@@ -278,8 +276,8 @@ def cmd_preview_augment(args):
     import torchvision.transforms.v2.functional as F
     from PIL import Image
 
-    from aigc_detect.dataset import ManifestImageDataset
-    from aigc_detect.transforms import build_train_transform
+    from aigc_detect.data.dataset import ManifestImageDataset
+    from aigc_detect.data.transforms import build_train_transform
 
     if not TRAIN_MANIFEST.exists():
         print(f"No train manifest at {TRAIN_MANIFEST}. Run `main.py download ...` then `main.py split` first.")
@@ -305,7 +303,7 @@ def cmd_preview_augment(args):
 
 
 def cmd_list_backbones(_args):
-    from aigc_detect.backbones import BACKBONE_REGISTRY, list_backbones
+    from aigc_detect.registry.backbones import BACKBONE_REGISTRY, list_backbones
 
     for key in list_backbones():
         entry = BACKBONE_REGISTRY[key]
@@ -366,7 +364,7 @@ def _resolve_manifest(name: str):
 
 
 def cmd_embed(args):
-    from aigc_detect.embed import precompute_embeddings
+    from aigc_detect.embed.embeddings import precompute_embeddings
 
     manifest = _resolve_manifest(args.manifest)
 
@@ -381,7 +379,7 @@ def cmd_embed(args):
 
 
 def cmd_embed_views(args):
-    from aigc_detect.embed_views import precompute_view_embeddings
+    from aigc_detect.embed.views import precompute_view_embeddings
 
     manifest = _resolve_manifest(args.manifest)
     precompute_view_embeddings(
@@ -400,8 +398,8 @@ def cmd_embed_views(args):
 
 
 def cmd_train_head_views(args):
-    from aigc_detect.embed_views import cache_stem
-    from aigc_detect.train_head import (
+    from aigc_detect.embed.views import cache_stem
+    from aigc_detect.train.probe import (
         TRAIN_VIEWS_ALL_SEVERITIES,
         TRAIN_VIEWS_DEFAULT,
         TRAIN_VIEWS_WITH_CHAINS,
@@ -452,7 +450,7 @@ def cmd_train_head_views(args):
 
 
 def cmd_eval_grid(args):
-    from aigc_detect.eval_grid import evaluate_grid
+    from aigc_detect.evaluation.grid import evaluate_grid
 
     manifest = _resolve_manifest(args.manifest)
     head_path = Path(args.head) if args.head else ROOT_DIR / "models" / f"{args.backbone}__{args.head_kind}.pt"
@@ -473,8 +471,8 @@ def cmd_eval_grid(args):
 
 
 def cmd_train_head(args):
-    from aigc_detect.embed import embeddings_path
-    from aigc_detect.train_head import train_head
+    from aigc_detect.embed.embeddings import embeddings_path
+    from aigc_detect.train.probe import train_head
 
     train_npz = embeddings_path(args.backbone, TRAIN_MANIFEST)
     val_npz = embeddings_path(args.backbone, VAL_MANIFEST)
@@ -497,7 +495,7 @@ def cmd_train_head(args):
 
 
 def cmd_error_analysis(args):
-    from aigc_detect.error_analysis import run_error_analysis
+    from aigc_detect.evaluation.error_analysis import run_error_analysis
 
     manifest = _resolve_manifest(args.manifest)
     head_path = Path(args.head) if args.head else ROOT_DIR / "models" / f"{args.backbone}__{args.head_kind}.pt"
@@ -520,7 +518,7 @@ def cmd_error_analysis(args):
 
 
 def cmd_predict(args):
-    from aigc_detect.predict import run_inference
+    from aigc_detect.inference.predict import run_inference
 
     head_path = Path(args.head) if args.head else ROOT_DIR / "models" / "pe-core-l__linear__allsev_e1.pt"
     if not head_path.exists():
@@ -622,7 +620,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_audit.set_defaults(func=cmd_audit_data)
 
     sub.add_parser(
-        "list-backbones", help="List registered frozen-backbone keys (src/aigc_detect/backbones.py)."
+        "list-backbones", help="List registered frozen-backbone keys (src/aigc_detect/registry/backbones.py)."
     ).set_defaults(func=cmd_list_backbones)
 
     p_embed = sub.add_parser(

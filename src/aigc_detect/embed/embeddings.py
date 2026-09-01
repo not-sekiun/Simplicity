@@ -2,7 +2,7 @@
 
 Per the "Simplicity Prevails" recipe (arXiv:2602.01738), preprocessing is
 "resized and center-cropped to the native resolution of each model" with no
-additional augmentation -- see aigc_detect.transforms.build_backbone_transform
+additional augmentation -- see aigc_detect.data.transforms.build_backbone_transform
 for the aspect-preserving resize + center-crop tail already used elsewhere in
 this project, reused here at each backbone's own native resolution.
 
@@ -21,10 +21,10 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 from tqdm import tqdm
 
-from aigc_detect.backbones import load_backbone
 from aigc_detect.config import EMBEDDINGS_DIR
-from aigc_detect.dataset import ManifestImageDataset
-from aigc_detect.transforms import build_backbone_transform
+from aigc_detect.data.dataset import ManifestImageDataset
+from aigc_detect.data.transforms import build_backbone_transform
+from aigc_detect.registry.backbones import load_backbone
 
 
 def embeddings_path(backbone_key: str, manifest_path: str | Path) -> Path:

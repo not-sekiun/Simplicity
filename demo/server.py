@@ -44,11 +44,8 @@ import base64
 import binascii
 import io
 import logging
-import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import numpy as np
 import requests
@@ -60,10 +57,10 @@ from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel
 from torchvision.transforms import v2
 
-from aigc_detect.backbones import load_backbone  # noqa: E402
-from aigc_detect.config import ROOT_DIR  # noqa: E402
-from aigc_detect.heads import build_head  # noqa: E402
-from aigc_detect.transforms import build_backbone_transform  # noqa: E402
+from aigc_detect.config import ROOT_DIR
+from aigc_detect.data.transforms import build_backbone_transform
+from aigc_detect.registry.backbones import load_backbone
+from aigc_detect.registry.heads import build_head
 
 DEFAULT_HEAD = ROOT_DIR / "models" / "pe-core-l__linear__allsev_e1.pt"
 FETCH_TIMEOUT = 6.0
