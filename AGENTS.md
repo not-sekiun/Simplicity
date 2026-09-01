@@ -25,97 +25,119 @@ rather than success.
 - `torch==2.13.0+cu130`, pinned via `[tool.uv.sources]` / `[[tool.uv.index]]`
   in `pyproject.toml` (RTX 3080, driver supports CUDA 13.3). Verified
   working with a real CUDA op — don't assume, but this has been checked.
-- Single entry point: `uv run main.py <command>` (run `--help` for the
-  full subcommand list). `scripts/*.py` are importable modules main.py
-  wraps, not meant to be the primary interface.
+- **The project is an installed package.** `import aigc_detect` works from
+  anywhere; there is no `sys.path` manipulation anywhere in the tree, and
+  adding any back is a regression a test will catch.
+- **Two equivalent entry points.** `uv run aigc <command>` is the console
+  script; `uv run main.py <command>` is a 13-line shim kept because every
+  document and every muscle memory uses that form. They dispatch to the
+  same `aigc_detect.cli`.
+- **Dev tooling:** `uv run ruff check .` and `uv run pytest`. Both are
+  currently clean and green — keep them that way; the test suite is what
+  makes restructuring safe.
+- **Configuration:** copy `.env.example` to `.env`. Nothing outside
+  `aigc_detect.config.settings` reads `os.environ`. `AIGC_DATA_ROOT`
+  relocates the ~24 GB image tree off the system drive.
 
 ## Layout
 
 ```
-main.py                       Entry-point CLI
+main.py                        13-line shim -> aigc_detect.cli
+predict.py                     Deliverable inference entry point (shim)
 src/aigc_detect/
-  config.py                    Paths, label ids (0=real, 1=aigc), IMAGE_SIZE=224,
-                                 VAL_FRACTION=0.15, RANDOM_SEED=42
-  transforms.py                 Augmentation / robustness-eval pipeline
-                                 (torchvision.transforms.v2). Implements the
-                                 brief's exact transform table (5.2) — don't
-                                 change parameter values without checking it.
-  dataset.py                    ManifestImageDataset(Dataset): CSV manifest
-                                 (image_path,label,source) -> (tensor, label)
-  backbones.py                  Frozen VFM registry (metaclip2-h, dinov3-l,
-                                 pe-core-l, dinov2-g). load_backbone(key) ->
-                                 (module, pooled_dim, native_res). Asserts <2e9
-                                 params. Ship the VISION TOWER only.
-  embed.py                      precompute_embeddings() -> cached .npz under
-                                 data/embeddings/<backbone>__<manifest>.npz
-  embed_views.py                Same, but one .npz per ROBUSTNESS VIEW (18:
-                                 clean + 14 single-transform + 3 chained), from
-                                 a single decode per image. --sample-rows draws
-                                 a seeded label-balanced subsample and tags the
-                                 cache stem. Read its docstring before touching
-                                 seeding or cache keys.
-  eval_grid.py                  Scores a trained head across every cached view:
-                                 per-view AUC/BAcc at ONE fixed threshold,
-                                 AUC_robust three ways, robustness gap,
-                                 single-vs-chained delta. Deliverable 5.5.4.
-  heads.py                      LinearHead / MLPHead / build_head(kind, in_dim)
-  train_head.py                 Paper recipe (AdamW lr 1e-3, bs 128, 2 epochs)
-                                 on cached embeddings; per-source val AUC
-scripts/
-  download_data.py               CIFAKE (Kaggle) + SID_Set (HF, streamed/capped)
-                                  TRAINING data downloaders + per-source indexers
-  audit_data.py                   Shortcut audit + blind probe (16x16 greyscale
-                                   logistic regression). Clearing ~70% means a
-                                   shortcut survives. Permanent regression test.
-  make_splits.py                  Merges data/raw/*_index.csv, stratified 85/15
-                                   split -> data/processed/{train,val}.csv
-  download_demo_val.py            Self-reported demo-val downloaders: COCO
-                                   val2017 (auto) + WildFake "DALL·E Advanced"
-                                   (manual-import, indexed once you place files)
-  make_demo_val.py                 Merges demo-val indexes -> demo_val.csv,
-                                    runs a leakage guard against train/val
-data/
-  raw/                            Per-source *_index.csv + downloaded training
-                                   images (gitignored)
-  processed/                      train.csv / val.csv — what training actually
-                                   reads (gitignored)
-  demo_val/                       demo_val.csv — self-reported ONLY, see below
-                                   (gitignored)
+  cli/                         One module per command group; each command's
+                                 handler and its argparse registration live
+                                 together as register_<command>(sub). Adding a
+                                 command is one file plus one line in parser.py.
+                                 parser.py's docstring IS the root --help text.
+  config/
+    settings.py                  .env + os.environ, the ONLY reader of either.
+                                   Cheap to import on purpose: no torch (device
+                                   resolution is a lazy function).
+    paths.py                     Every directory and manifest, rooted at
+                                   $AIGC_DATA_ROOT so the tree relocates whole.
+    labels.py                    0=real, 1=aigc; split seed; fallback norm stats.
+    generators.py                generator -> architecture family; TRAIN_GENERATORS.
+  registry/
+    backbones.py                 Frozen VFM registry. load_backbone(key) ->
+                                   (module, pooled_dim, native_res). Asserts
+                                   <2e9 params. Ship the VISION TOWER only.
+    heads.py                     LinearHead / MLPHead / build_head(kind, in_dim)
+  data/
+    transforms.py                The brief's exact 5.2 transform table — don't
+                                   change parameter values without checking it.
+    dataset.py                   ManifestImageDataset: CSV -> (tensor, label)
+  embed/
+    embeddings.py                One pooled embedding per image, cached .npz
+    views.py                     One .npz per ROBUSTNESS VIEW (18: clean + 14
+                                   single-transform + 3 chained) from a single
+                                   decode. Read its docstring before touching
+                                   seeding or cache keys.
+  train/probe.py               Paper recipe on cached embeddings
+  evaluation/
+    grid.py                      Per-view AUC/BAcc at one fixed threshold,
+                                   AUC_robust, robustness gap. Deliverable 5.5.4.
+    error_analysis.py            Deliverable 5.5.5.
+  inference/predict.py         {image_path, pred} JSON. Owns DECISION_THRESHOLD.
+scripts/                       Ad-hoc corpus pulls and one-off drivers. Being
+                                 replaced tier by tier (see below), NOT deleted
+                                 ahead of their replacements.
+tests/                         CLI contract + config surface. Written against
+                                 the invocation, not import paths, so they
+                                 survive code moving.
+docs/                          findings, experiments, data, transforms, archive/
+data/                          Gitignored. $AIGC_DATA_ROOT-relocatable.
 ```
 
-## Current state (as of 2026-08-29)
+## Current state (as of 2026-09-02)
 
-**Built & verified:** environment/CUDA, dataset download + indexing, the
-augmentation pipeline, generator-aware stratified splits, both halves of
-demo-val, the shortcut audit (`audit_data.py`), the aspect-preserving
-resize fix, the full frozen-backbone + probe-head pipeline
-(`backbones.py` / `embed.py` / `heads.py` / `train_head.py`), and the
-robustness grid (`embed_views.py` / `eval_grid.py`).
+**The submission is tagged `hackathon-final`.** Post-hackathon work happens
+on `refactor/v2` and is turning this into an extensible testbed.
 
-**Data on disk (training pool is Tiny-GenImage ONLY):** `train.csv`
-(23,800) / `val.csv` (4,200), `heldout.csv` (7,000, in-distribution,
-never trained on), `demo_val.csv` (13,843 = COCO val2017 + WildFake
-DALL·E Advanced, self-reported eval only).
+**Shipping model:** `models/pe-core-l__linear__allsev_e1.pt` — a linear probe
+on frozen `pe-core-l`, pinned to hub revision `e63206c8`, at decision
+threshold **0.980**. That threshold is calibrated to *this* checkpoint and
+currently lives as a module constant in `inference/predict.py`; re-derive it
+on every head swap with `scripts/derive_threshold.py`. Superseded ablation
+arms are in `models/archive/` — moved, not deleted, because
+`docs/findings.md` cites their numbers.
 
-**CIFAKE and SID_Set were both dropped from training** — SID_Set carries
-a composition shortcut (0.93 balanced accuracy from an 8x8 greyscale
-thumbnail; a SID_Set-trained head transfers to CIFAKE at chance) and
-CIFAKE measured as actively harmful. See docs/findings.md sections 1 and 2d.
-The images may still be on disk; the manifests do not reference them.
+**Backbone race: decided.** `pe-core-l` beat `metaclip2-h` and `dinov3-l` on
+the OOD tier (the only tier with room left to discriminate). Results are
+committed under `reports/race/`; the losing weights have been deleted from
+the HF cache and re-download on demand.
 
-**Model bring-up:** only `pe-core-l` has been run end to end —
-`models/pe-core-l__linear.pt`, demo-val AUC 0.9949 / FPR 0.019. The other
-three backbones are wired but not yet raced; do that on
-`--sample-rows 2000` against the grid, not on clean AUC (val is saturated
-at 0.9996). See docs/findings.md section 7.
+**Evaluation tiers, none trained on:** `val` (in-distribution), `heldout`
+(same generators), `demo_val` (the brief's benchmark), `ood` (18 generators,
+ten unseen), `wildrf_test` (real social-media re-encoding), and
+`dalle3_holdout` (modern diffusion, deliberately kept back).
 
-**Not built yet:**
-- Inference script emitting `{image_path, pred}` JSON (required deliverable)
-- Backbone race across the remaining three (unblocked — grid now exists)
-- Augmented-view training ablation (needs `embed-views --manifest train`)
-- Cross-generator evaluation via `split --holdout-generators`
-- Calibration (temperature + threshold per degradation bucket)
-- Error analysis note (false positive/negative examples, trade-offs)
+**Built and working:** the full frozen-backbone + probe pipeline, the 18-view
+robustness grid, error analysis, the deliverable inference script, and the
+demo server + Chrome extension.
+
+**Refactor progress:** Tiers 0–3 are done — safety net, docs consolidation,
+a 35 GB disk scrub, the package restructure, and this config package. The
+remaining tiers, in order:
+
+- **4 — content-addressed cache.** The current cache is keyed on a SHA1 of
+  *absolute image paths*, so renaming the repo invalidates all 274 caches and
+  a re-encoded image is served stale. `scripts/worker.py` documents this as a
+  rule people must obey ("THE REPO PATH MUST MATCH"). Replacing it with
+  content hashes plus a SQLite index removes the rule, not just the bug.
+- **5 — data hierarchy and manifest recipes**, then the image-level prune
+  that has to wait for tier 4 (the migration hashes files the prune deletes).
+- **6 — a source registry and resumable fetchers**, replacing the six ad-hoc
+  `download_*.py` scripts, with the blind-probe audit as a gate on every pull.
+- **7 — experiment configs and a model bundle** carrying its own threshold;
+  this is where backbone and head become genuinely swappable.
+- **8 — demo as first class:** a `Detector` protocol and a cross-browser
+  extension build.
+- **9 — CI.**
+
+**Known issue, unfixed:** `data/demo_val/demo_val.csv` references 5,000 COCO
+images by absolute path inside `~/.cache/kagglehub`. A committed manifest
+depends on a transient cache directory; tier 5 ingests those images.
 
 ## Key decisions / constraints
 

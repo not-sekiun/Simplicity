@@ -47,7 +47,7 @@ aspect ratio**, so this shortcut survives the entire scored evaluation. A model
 riding it would produce a flat, excellent-looking robustness table having
 learned nothing.
 
-**Fix:** `build_backbone_transform()` in `src/aigc_detect/transforms.py` —
+**Fix:** `build_backbone_transform()` in `src/aigc_detect/data/transforms.py` —
 aspect-preserving `Resize(shortest_side)` + square crop (`RandomCrop` at train,
 `CenterCrop` at eval). All three pipeline builders now use it. The 5.2
 parameter table is unchanged.
@@ -981,7 +981,7 @@ to help:
 | DALLE2 degraded | 0.7927 | **0.7205** |
 | real FPR@t | 0.011 | 0.019 |
 
-Re-ran at 1 epoch in case the saved-final-epoch rule (`train_head.py`, no
+Re-ran at 1 epoch in case the saved-final-epoch rule (`train/probe.py`, no
 best-epoch selection) had caught an overshoot. It had not: 0.9949 / 0.9579. The
 regression was real.
 
@@ -1143,21 +1143,21 @@ depth-map fault: **a label correlating with something other than the generator.*
   on 16x16 greyscale). `--transform` runs it on tensors from the real eval
   pipeline. **Clearing ~70% means a shortcut survives.** Keep as a permanent
   regression test.
-- `src/aigc_detect/transforms.py` — added `build_backbone_transform()`,
+- `src/aigc_detect/data/transforms.py` — added `build_backbone_transform()`,
   repointed all three builders. Parameter table untouched.
 - `main.py` — `audit-data` subcommand.
 
 ### Wave 2
-- `src/aigc_detect/backbones.py` — frozen-backbone registry. Asserts vision-tower
+- `src/aigc_detect/registry/backbones.py` — frozen-backbone registry. Asserts vision-tower
   params < 2e9 and prints the count.
-- `src/aigc_detect/embed.py` — `precompute_embeddings(...)`, caches to
+- `src/aigc_detect/embed/embeddings.py` — `precompute_embeddings(...)`, caches to
   `data/embeddings/<backbone>__<manifest>.npz` (arrays: `embeddings`, `labels`,
   `sources` + metadata). Supports `--limit` and `--force`.
-- `src/aigc_detect/heads.py` — `LinearHead`, `MLPHead`, `build_head(kind, in_dim)`.
-- `src/aigc_detect/train_head.py` — paper recipe, standardises on **train**
+- `src/aigc_detect/registry/heads.py` — `LinearHead`, `MLPHead`, `build_head(kind, in_dim)`.
+- `src/aigc_detect/train/probe.py` — paper recipe, standardises on **train**
   statistics only, reports val AUC **broken down by source**, saves to
   `models/<backbone>__<head>.pt`.
-- `src/aigc_detect/config.py` — added `EMBEDDINGS_DIR`.
+- `src/aigc_detect/config/paths.py` — added `EMBEDDINGS_DIR`.
 - `main.py` — `list-backbones`, `embed`, `train-head`.
 - `pyproject.toml` — added `timm`, `transformers`.
 
@@ -1403,7 +1403,7 @@ the **same dataset family the paper trains on**.
    plausible, and the conclusion would have been the exact inverse of the truth:
    "replacing the dirty data made no difference."
 
-   Fixed in `embed.py`: `manifest_fingerprint()` hashes the manifest's
+   Fixed in `embed/embeddings.py`: `manifest_fingerprint()` hashes the manifest's
    `image_path` column in order and stores it in the `.npz`; a mismatch (or a
    missing fingerprint, i.e. any cache written before this existed) forces a
    recompute. **Expected healthy output is one of:**
@@ -1486,7 +1486,7 @@ the **same dataset family the paper trains on**.
 
 9. **Normalization stats must come from the backbone, not `config.py`. FIXED
    2026-08-29.** The grid builders hardcoded `config.NORM_MEAN/NORM_STD`
-   (ImageNet), while `embed.py` normalizes with `module.norm_mean` /
+   (ImageNet), while `embed/embeddings.py` normalizes with `module.norm_mean` /
    `module.norm_std` -- each backbone's own (PE-Core is 0.5/0.5, MetaCLIP2 uses
    OpenAI-CLIP stats). Feeding grid tensors to a backbone would have evaluated
    every view under normalization the model was never trained with, and the
@@ -1504,7 +1504,7 @@ the **same dataset family the paper trains on**.
     torch RNG. For a *cached* eval view that is a correctness problem, not a
     cosmetic one: re-running the grid would score a different set of images,
     so two backbones raced against each other would not face the same test.
-    `embed_views.py` seeds every stochastic view to make it byte-reproducible
+    `embed/views.py` seeds every stochastic view to make it byte-reproducible
     across runs, workers, and backbones. **The seed key was changed once --
     see trap 12.**
 

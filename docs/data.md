@@ -52,5 +52,5 @@ holdouts, and **`dalle3_holdout` is the only clean unseen-generator evidence** â
 which is exactly why it was held out. Prefer "four truly unseen generators in
 `ood`, plus a fully held-out modern generator" over the old "10 unseen" phrasing.
 
-Source: `src/aigc_detect/config.py`, the manifests under `data/processed/`, and
+Source: `src/aigc_detect/config/paths.py`, the manifests under `data/processed/`, and
 `data/quarantine/README.md`.

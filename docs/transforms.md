@@ -73,5 +73,5 @@ not simply "more coverage is better".
   `build_train_transform` exist but are **not** in the training path — the only
   caller is `main.py preview-augment`.
 
-Source: `src/aigc_detect/transforms.py` (`CHAIN_SPECS`, `TRAIN_CHAIN_SPECS`),
-`src/aigc_detect/train_head.py` (`TRAIN_VIEWS_ALL_SEVERITIES`).
+Source: `src/aigc_detect/data/transforms.py` (`CHAIN_SPECS`, `TRAIN_CHAIN_SPECS`),
+`src/aigc_detect/train/probe.py` (`TRAIN_VIEWS_ALL_SEVERITIES`).

@@ -80,18 +80,40 @@ Requires [uv](https://docs.astral.sh/uv/) and an NVIDIA GPU + driver (CUDA
 CPU-only inference works but is slow for anything beyond a handful of images.
 
 ```bash
-uv sync                    # creates .venv, installs torch+cu130 and all deps
-uv run main.py check-env   # verify GPU is visible to PyTorch, report dataset status
+uv sync --all-extras --group dev   # .venv, torch+cu130, demo/viz extras, ruff+pytest
+cp .env.example .env               # optional: every key has a working default
+uv run aigc check-env              # verify GPU is visible, report dataset status
 ```
+
+`uv sync` on its own installs just the inference dependencies. The extras are
+`demo` (the local server behind the browser extension) and `viz` (chart
+rendering); `--group dev` adds ruff and pytest.
+
+`.env` is optional — an empty one is valid. It exists so you can point
+`AIGC_DATA_ROOT` at another drive (the image corpora are ~24 GB), supply an
+`HF_TOKEN` for gated datasets, or change which checkpoint the demo server
+loads, without editing code. `aigc_detect.config.settings` is the only thing
+that reads it. See `.env.example` for the full list.
 
 `pyproject.toml` pins PyTorch to the `cu130` wheel index via
 `[tool.uv.sources]` / `[[tool.uv.index]]`. If your GPU/driver only supports
 an older CUDA, edit those two blocks to `cu126` (or your version) and
 re-run `uv sync`.
 
-**Always run code through uv** (`uv run main.py ...` / `uv run python ...`),
+**Always run code through uv** (`uv run aigc ...` / `uv run python ...`),
 never a bare `python`/`pip` — this is a uv-managed project and the pinned
 CUDA wheel only resolves inside the uv environment.
+
+The CLI has two equivalent forms: `uv run aigc <command>` (the console entry
+point) and `uv run main.py <command>` (a shim, kept because the docs and the
+command reference below all use it). They dispatch to the same code.
+
+Checks, if you are changing anything:
+
+```bash
+uv run ruff check .   # lint; currently clean
+uv run pytest         # CLI surface + config contract; currently 70 green
+```
 
 ## Quick start: run inference on your own images
 
@@ -230,7 +252,7 @@ it has never seen, from a publisher it has never seen? It does — see below.
 
 ## Robustness pipeline
 
-`src/aigc_detect/transforms.py` implements the brief's transform table
+`src/aigc_detect/data/transforms.py` implements the brief's transform table
 (5.2) exactly:
 
 | Transform | Parameters | Real-world analog |
@@ -392,47 +414,67 @@ condition a re-uploaded, re-compressed image actually meets.
 ## Project layout
 
 ```
-main.py                       Entry-point CLI (`uv run main.py --help` for the full list)
-predict.py                    Standalone inference entry point (deliverable 5.5.2)
+main.py                        Shim -> aigc_detect.cli (`uv run main.py --help`)
+predict.py                     Standalone inference entry point (deliverable 5.5.2)
+.env.example                   Documented environment variables; copy to .env
 src/aigc_detect/
-  config.py                    Paths, label ids, generator/family tables, split fraction
-  transforms.py                 Robustness transform pipeline (5.2 table + chains)
-  dataset.py                    ManifestImageDataset: CSV manifest -> (tensor, label)
-  backbones.py                  Frozen VFM registry + loader (asserts <2B params)
-  embed.py / embed_views.py     Cache pooled embeddings, per-view or per-manifest
-  heads.py                      LinearHead / MLPHead
-  train_head.py                 Paper training recipe on cached embeddings
-  eval_grid.py                  Robustness evaluation summary (5.5.4)
-  error_analysis.py             False positive/negative + per-generator report (5.5.5)
-  predict.py                    Inference logic shared by predict.py and `main.py predict`
+  cli/                         One module per command group. Each command's handler
+                                 and its argparse registration live together, so
+                                 adding a command is one file plus one line.
+  config/
+    settings.py                  .env + os.environ — the only reader of either
+    paths.py                     Directories and manifests, rooted at $AIGC_DATA_ROOT
+    labels.py                    Label ids, split fraction, fallback norm stats
+    generators.py                Generator -> architecture family tables
+  registry/
+    backbones.py                 Frozen VFM registry + loader (asserts <2B params)
+    heads.py                     LinearHead / MLPHead
+  data/
+    transforms.py                Robustness transform pipeline (5.2 table + chains)
+    dataset.py                   ManifestImageDataset: CSV manifest -> (tensor, label)
+  embed/
+    embeddings.py                Cache pooled embeddings per manifest
+    views.py                     Cache one embedding per robustness view
+  train/probe.py               Paper training recipe on cached embeddings
+  evaluation/
+    grid.py                      Robustness evaluation summary (5.5.4)
+    error_analysis.py            False positive/negative + per-generator report (5.5.5)
+  inference/predict.py         Inference logic shared by predict.py and `aigc predict`
+tests/                         CLI surface + config contract (`uv run pytest`)
 scripts/
-  download_data.py, download_tiny_genimage.py, download_demo_val.py,
-  download_ood_benchmark.py      Dataset downloaders/indexers
-  make_splits.py, make_heldout.py, make_demo_val.py, make_ood.py
-                                  Manifest builders for each tier
+  download_*.py                  Dataset downloaders/indexers, one per corpus
+  make_*.py                      Manifest builders for each tier
   audit_data.py                  Shortcut audit + blind-probe canary (every corpus dir)
-  download_aigc_modern.py        Modern-generator pulls + the DALL-E 3 holdout
-  download_real_domains.py, make_wildrf.py, make_sid_real.py, make_train_ext.py
-                                 Real-domain corpora and the extended training pool
+  derive_threshold.py            The decision-threshold protocol, as code
   train_instrumented.py          Instrumented replica of the shipping run -> stats/
   export_eval_stats.py           Every evaluation number as tidy CSV -> stats/
-  plot_stats.py                  Renders stats/charts/*.png
+  plot_stats.py                  Renders the charts
   run_race.py                    Backbone race runner
-data/                           gitignored — check `main.py check-env` before assuming
+  worker.py                      Distributed embedding on a second machine
+data/                          gitignored — run `aigc check-env` before assuming.
+                                 Relocatable via $AIGC_DATA_ROOT.
   raw/ processed/ heldout/ demo_val/ ood/ embeddings/
   aigc_ext/ real_ext/            Modern generators and real-domain corpora
   quarantine/                    Rejected corpora + the evidence (never train on these)
-models/                         Trained head checkpoints (small — a few KB each,
-                                 the backbone weights are never saved, only downloaded)
-stats/                          Presentation data + charts (see stats/README.md)
-reports/                        Robustness grids, race results, error analysis, audit log
+models/                        Head checkpoints (a few KB each; backbone weights are
+                                 downloaded, never saved here). archive/ holds
+                                 superseded ablation arms whose numbers the docs cite.
+stats/                         Presentation data (see stats/README.md)
+docs/                          findings, experiments, data, transforms, assets/, archive/
+reports/                       Robustness grids, race results, error analysis, audit log
 ```
 
 ## Development tools & stack
 
 - Python 3.11.15, [uv](https://docs.astral.sh/uv/) for environment/dependency
-  management. Optional extras: `--extra demo` (FastAPI demo server),
-  `--extra viz` (matplotlib, for `stats/charts/`).
+  management. The project is an installed package (hatchling, `src/` layout),
+  so `import aigc_detect` works without any path manipulation. Optional
+  extras: `--extra demo` (FastAPI demo server), `--extra viz` (matplotlib).
+- `ruff` for linting and `pytest` for the contract tests, in the `dev`
+  dependency group. Both are clean and green on `main`; the test suite pins
+  the CLI surface and the config package's public names, which is what makes
+  restructuring the codebase safe rather than hopeful.
+- `python-dotenv` for `.env` loading — see [Setup](#setup).
 - PyTorch 2.13.0+cu130 + torchvision, scikit-learn (AUC/balanced
   accuracy), pandas/numpy, Hugging Face `datasets`/`transformers`/`timm`
   for backbone loading and dataset streaming, kagglehub for one dataset
