@@ -295,7 +295,7 @@ def train_head_on_views(
         f"manifest_fingerprint {next(iter(val_fps))}"
     )
 
-    clean_emb, clean_labels = train_arrays["clean"]
+    clean_emb, _clean_labels = train_arrays["clean"]
     mean = clean_emb.mean(axis=0)
     std = clean_emb.std(axis=0)
     std[std == 0] = 1.0
@@ -306,7 +306,7 @@ def train_head_on_views(
         drop = {g.strip().lower() for g in exclude_generators}
         stems = [(train_stem, train_manifest, train_sample_rows),
                  *[(st, mf, None) for st, mf in extra_train]]
-        for (stem, manifest, sample_rows), arrays in zip(stems, all_sets):
+        for (stem, manifest, sample_rows), arrays in zip(stems, all_sets, strict=False):
             if manifest is None:
                 raise SystemExit(
                     f"[train-views] --exclude-generators needs the manifest for stem '{stem}' "
@@ -452,7 +452,7 @@ def train_head(
     _assert_fresh(train_npz, TRAIN_MANIFEST, "train")
     _assert_fresh(val_npz, VAL_MANIFEST, "val")
 
-    train_emb, train_labels, train_sources, train_meta = _load_npz(train_npz)
+    train_emb, train_labels, _train_sources, train_meta = _load_npz(train_npz)
     val_emb, val_labels, val_sources, _ = _load_npz(val_npz)
 
     in_dim = train_emb.shape[1]
@@ -473,8 +473,8 @@ def train_head(
         f"[train-head] backbone={backbone_key} head={head_kind} in_dim={in_dim} "
         f"train_n={len(train_emb)} val_n={len(val_emb)} device={device}"
     )
-    print(f"[train-head] train label counts: {dict(zip(*np.unique(train_labels, return_counts=True)))}")
-    print(f"[train-head] val label counts:   {dict(zip(*np.unique(val_labels, return_counts=True)))}")
+    print(f"[train-head] train label counts: {dict(zip(*np.unique(train_labels, return_counts=True), strict=False))}")
+    print(f"[train-head] val label counts:   {dict(zip(*np.unique(val_labels, return_counts=True), strict=False))}")
 
     train_ds = TensorDataset(torch.from_numpy(train_emb_s), torch.from_numpy(train_labels.astype(np.float32)))
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)

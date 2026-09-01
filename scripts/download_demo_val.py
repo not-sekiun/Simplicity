@@ -103,7 +103,7 @@ def download_coco_val2017(prefer_kaggle: bool = True) -> Path:
     if prefer_kaggle:
         try:
             image_paths = _download_coco_via_kaggle_mirror()
-        except Exception as err:  # noqa: BLE001 - any auth/network failure -> fall back
+        except Exception as err:
             print(f"[coco_val2017] Kaggle mirror failed ({err!r}), falling back to official S3...")
 
     if not image_paths:

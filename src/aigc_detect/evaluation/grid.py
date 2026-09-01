@@ -185,7 +185,7 @@ def evaluate_grid(
     threshold = best_balanced_threshold(clean["labels"], clean["probs"])
     print(f"[eval-grid] fixed threshold {threshold:.4f} (balanced-accuracy optimum on the clean view)")
     print(f"[eval-grid] n={len(clean['labels'])} rows, label counts "
-          f"{dict(zip(*np.unique(clean['labels'], return_counts=True)))}\n")
+          f"{dict(zip(*np.unique(clean['labels'], return_counts=True), strict=False))}\n")
 
     for r in rows:
         r.update(_metrics(r["labels"], r["probs"], threshold))

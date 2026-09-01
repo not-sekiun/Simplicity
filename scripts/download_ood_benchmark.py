@@ -163,7 +163,7 @@ def reindex_from_disk() -> Path:
         for image_path, label, generator in records:
             w.writerow([image_path, label, SOURCE_NAME, generator])
 
-    n_real = sum(1 for _, l, _ in records if l == LABEL_REAL)
+    n_real = sum(1 for _, lbl, _ in records if lbl == LABEL_REAL)
     print(f"[ood] reindexed {len(records):,} images from disk ({n_real} real / {len(records)-n_real} aigc)")
     print(f"[ood] per-generator: {dict(sorted(Counter(g for _, _, g in records).items()))}")
     print(f"[ood] UNSEEN generators (absent from data/raw/): "
@@ -296,7 +296,7 @@ def download_ood_benchmark(
         for image_path, label, generator in records:
             w.writerow([image_path, label, source_name, generator])
 
-    n_real = sum(1 for _, l, _ in records if l == LABEL_REAL)
+    n_real = sum(1 for _, lbl, _ in records if lbl == LABEL_REAL)
     print(f"\n[ood] scanned {scanned:,}, kept {len(records):,} ({n_real} real / {len(records)-n_real} aigc)")
     print(f"[ood] per-generator kept: {dict(sorted(Counter(g for _, _, g in records).items()))}")
     unseen = sorted({g for _, _, g in records} - TRAIN_GENERATORS)

@@ -27,8 +27,8 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-import pandas as pd  # noqa: E402
+import matplotlib.pyplot as plt
+import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 STATS = ROOT / "stats"
@@ -126,7 +126,7 @@ def chart_val_curve():
                    edgecolor=S2, linewidth=2.0, zorder=5)
         ax.annotate(f"end epoch {e}: {row['auc_robust']:.4f}",
                     (xs, row["auc_robust"]), textcoords="offset points",
-                    xytext=(-10, -22 if e == 1 else -22), color=INK_2, fontsize=9, ha="right")
+                    xytext=(-10, -22), color=INK_2, fontsize=9, ha="right")
     for e in sorted(d["epoch"].unique())[1:]:
         ax.axvline(d[d["epoch"] == e]["step"].min(), color=MUTED, linewidth=1.0, linestyle=(0, (4, 3)))
     ax.annotate(f"{d.iloc[-1]['auc_clean']:.4f}", (d.iloc[-1]["step"], d.iloc[-1]["auc_clean"]),
@@ -174,7 +174,7 @@ def chart_per_view():
     ax.invert_yaxis()
     ax.set_yticks(y)
     ax.set_yticklabels([f"{v}{'' if trained[v] else '  (held out)'}" for v in wide.index], fontsize=9)
-    for lbl, v in zip(ax.get_yticklabels(), wide.index):
+    for lbl, v in zip(ax.get_yticklabels(), wide.index, strict=False):
         if not trained[v]:
             lbl.set_color(MUTED)
     # aqua is below 3:1 on this surface -> direct label satisfies the relief rule.
@@ -219,17 +219,17 @@ def chart_generators():
     d = pd.read_csv(STATS / "generator_recall.csv").sort_values("recall")
     colors = [S2 if f == "gan" else S1 for f in d["family"]]
     held = d["generator"].str.contains("held out")
-    colors = [S3 if h else c for c, h in zip(colors, held)]
+    colors = [S3 if h else c for c, h in zip(colors, held, strict=False)]
     fig, ax = plt.subplots(figsize=(9, 6.4))
     ax.barh(range(len(d)), d["recall"], color=colors, height=0.68, zorder=3)
     ax.set_yticks(range(len(d)))
-    ax.set_yticklabels([f"{g}  ({e})" for g, e in zip(d["generator"], d["era"])], fontsize=9)
-    for i, (v, h) in enumerate(zip(d["recall"], held)):
+    ax.set_yticklabels([f"{g}  ({e})" for g, e in zip(d["generator"], d["era"], strict=False)], fontsize=9)
+    for i, (v, h) in enumerate(zip(d["recall"], held, strict=False)):
         ax.text(v + 0.012, i, f"{v:.3f}", va="center", fontsize=8.5,
                 color=INK if h else INK_2, fontweight="bold" if h else "normal")
     ax.set_xlim(0, 1.12)
-    handles = [plt.Line2D([], [], marker="s", linestyle="", markersize=9, color=c, label=l)
-               for c, l in [(S1, "diffusion"), (S2, "GAN (out of scope)"), (S3, "DALL-E 3 -- held out")]]
+    handles = [plt.Line2D([], [], marker="s", linestyle="", markersize=9, color=c, label=lbl)
+               for c, lbl in [(S1, "diffusion"), (S2, "GAN (out of scope)"), (S3, "DALL-E 3 -- held out")]]
     style(ax, "Per-generator recall at the shipping threshold", "recall", "",
           "Our weakest generators are the OLDEST. The newest one, never trained on, is at 0.99.")
     leg = ax.legend(handles=handles, frameon=False, fontsize=9.5, loc="lower right")
@@ -248,7 +248,7 @@ def chart_ablation():
                "DALL-E 3 recall, 18-view (held out)", "higher is better"),
               ("ood", "recall_at_matched_fpr", S2,
                "OOD legacy-generator recall", "higher is better")]
-    for ax, (tier, metric, color, title, hint) in zip(axes, panels):
+    for ax, (tier, metric, color, title, hint) in zip(axes, panels, strict=False):
         sub = d[(d["tier"] == tier) & (d["metric"] == metric)].set_index("arm").reindex(order)
         bars = ax.barh(range(len(sub)), sub["value"], color=color, height=0.62, zorder=3)
         best = sub["value"].idxmax()
@@ -290,7 +290,7 @@ def chart_robustness_summary():
         vals = [d[(d.tier == t) & (d.condition == cond)]["auc"].iloc[0] for t in order]
         ys = [i2 + (j2 - 1) * h for i2 in range(len(order))]
         ax.barh(ys, vals, height=h * 0.92, color=color, label=label, zorder=3)
-        for yy, v, t in zip(ys, vals, order):
+        for yy, v, t in zip(ys, vals, order, strict=False):
             extra = ""
             if cond == "transformed_worst":
                 extra = "  " + d[(d.tier == t) & (d.condition == cond)]["worst_view"].iloc[0]

@@ -206,7 +206,7 @@ def score_batch(req: ScoreBatchRequest):
 
     fetched = list(_FETCH_POOL.map(_safe_fetch, req.urls))
     images, ok_urls, results = [], [], []
-    for u, item in zip(req.urls, fetched):
+    for u, item in zip(req.urls, fetched, strict=False):
         if isinstance(item, Exception):
             results.append({"url": u, "error": f"{type(item).__name__}: {item}"})
         else:
@@ -215,7 +215,7 @@ def score_batch(req: ScoreBatchRequest):
 
     preds = model.score(images)
     logger.info(f"{preds=}")
-    for u, p in zip(ok_urls, preds):
+    for u, p in zip(ok_urls, preds, strict=False):
         results.append({"url": u, "pred": p})
     return {"results": results}
 

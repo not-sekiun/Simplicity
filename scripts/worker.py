@@ -129,7 +129,7 @@ def run_job(job: str) -> None:
             out = DATA_DIR / "train_ext"
             download_ood_benchmark(
                 out_dir=out, index_path=out / "train_ext_index.csv",
-                source_name="aigc_bench_ext", only_generators=unseen + ("Real",),
+                source_name="aigc_bench_ext", only_generators=(*unseen, "Real"),
                 **TRAIN_EXT_PULL,
             )
     elif job.startswith("embed:"):

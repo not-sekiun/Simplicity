@@ -217,7 +217,7 @@ def stratified_sample(df: pd.DataFrame, n: int, seed: int = RANDOM_SEED) -> pd.D
                 break
             alloc[int(np.argmax(np.where(room > 0, sizes, -1.0)))] += 1
 
-        for (_src, g), k in zip(groups, alloc):
+        for (_src, g), k in zip(groups, alloc, strict=False):
             if k > 0:
                 picked = np.sort(rng.choice(len(g), size=int(k), replace=False))
                 parts.append(g.iloc[picked])
@@ -371,7 +371,7 @@ def precompute_view_embeddings(
                         and "view_fingerprint" in d
                         and str(d["view_fingerprint"]) == v_fp
                     )
-            except Exception:  # noqa: BLE001 - unreadable cache is treated as stale
+            except Exception:
                 ok = False
             if ok:
                 print(f"[embed-views] {out.name} matches the manifest and view spec -- skipping")

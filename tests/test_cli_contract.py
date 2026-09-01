@@ -90,7 +90,7 @@ def test_every_package_module_imports():
     for mod in pkgutil.walk_packages(aigc_detect.__path__, prefix="aigc_detect."):
         try:
             __import__(mod.name)
-        except Exception as exc:  # noqa: BLE001 - reporting all failures beats the first
+        except Exception as exc:
             failures.append(f"{mod.name}: {type(exc).__name__}: {exc}")
     assert not failures, "modules failed to import:\n" + "\n".join(failures)
 

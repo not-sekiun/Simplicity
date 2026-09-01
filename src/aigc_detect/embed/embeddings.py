@@ -78,7 +78,7 @@ def precompute_embeddings(
         try:
             cached = np.load(out_path, allow_pickle=True)
             cached_fp = str(cached["manifest_fingerprint"]) if "manifest_fingerprint" in cached else None
-        except Exception:  # noqa: BLE001 - unreadable cache is treated as stale
+        except Exception:
             cached_fp = None
         if cached_fp == fingerprint:
             print(f"[embed] {out_path} already exists and matches the manifest -- skipping")
