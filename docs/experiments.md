@@ -1,7 +1,7 @@
 # Training narrative — AIGC detection (TikTok TechJam 2026, Track 5)
 
 Every model run, in order, with what it changed and what it taught. This is
-the "how we got here" document; `FINDINGS.md` holds the forensics and the
+the "how we got here" document; `findings.md` holds the forensics and the
 traps, `AGENTS.md` holds the current-state map.
 
 ## Comparability epochs — READ BEFORE COMPARING ANY TWO NUMBERS
@@ -421,7 +421,7 @@ by less.
 
 **Full per-view tables for both evaluation sets — all 18 scored views, AUC /
 BAcc@t / BAcc@0.5 / TPR / FPR, with the trained-vs-held-out marking and the
-per-view progression across all three heads — are in FINDINGS.md section 2f.**
+per-view progression across all three heads — are in findings.md section 2f.**
 Machine-readable per-view CSVs are in `reports/`.
 
 Two things the full table shows that the summary above hides:

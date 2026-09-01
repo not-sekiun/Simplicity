@@ -14,8 +14,7 @@ Per backbone, per eval set (`val`, `ood`): `auc_clean`, `auc_robust`
 and `per_view` (all 18 view AUCs).
 
 **Judge on `ood`, not `val`.** val is saturated (11 of 18 views >= 0.99);
-ood-s4000 has none and spans 0.8099-0.9532. The decision rule and tie-breakers
-are in `../../HANDOFF.md` section 2.
+ood-s4000 has none and spans 0.8099-0.9532.
 
 Fairness: every backbone saw byte-identical rows (same seeded stratified
 subsample), identical per-(image, view) transform seeds, and identical seeded

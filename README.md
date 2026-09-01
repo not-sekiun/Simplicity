@@ -27,7 +27,7 @@ Feature-complete. Every §5.5 deliverable is implemented and reported.
 |---|---|
 | Data pipeline (download, index, split, 6 held-out eval tiers) | done |
 | Robustness transform pipeline (brief's exact 5.2 table + 3 realistic chains) | done |
-| Shortcut audit (blind-probe canary over every corpus directory) | done — caught **three** mislabelled corpora, see [FINDINGS.md](FINDINGS.md) |
+| Shortcut audit (blind-probe canary over every corpus directory) | done — caught **three** mislabelled corpora, see [docs/findings.md](docs/findings.md) |
 | Frozen-backbone + linear-probe model pipeline | done |
 | Backbone race (`pe-core-l` vs `dinov3-l` vs `metaclip2-h`) | done — **`pe-core-l` wins** |
 | Inference script, `{image_path, pred}` JSON (deliverable 5.5.2) | done — `predict.py` |
@@ -37,10 +37,10 @@ Feature-complete. Every §5.5 deliverable is implemented and reported.
 | Presentation stats + charts | done — [`stats/`](stats/README.md) |
 | `metaclip2-giant` backbone (legal, registered) | not pursued — blocked on a micro-batching change, deprioritized |
 
-Full state and reasoning: **[HANDOFF.md](HANDOFF.md)** (start here) →
-[NARRATIVE.md](NARRATIVE.md) (numbered experiment log) →
-[FINDINGS.md](FINDINGS.md) (forensic detail on data faults) →
-[DEMO.md](DEMO.md) (the demo/pitch script).
+Full state and reasoning: **[docs/experiments.md](docs/experiments.md)**
+(numbered experiment log) → [docs/findings.md](docs/findings.md) (forensic
+detail on data faults) → [docs/archive/demo-script.md](docs/archive/demo-script.md)
+(the demo/pitch script).
 
 > **A high AUC on this project is evidence of a leak until proven otherwise.**
 > Three separate corpora reached training mislabelled — depth maps as
@@ -139,7 +139,7 @@ tower only, each asserted under the 2B-parameter cap):
 | **`pe-core-l`** | 336px | 316.1M | **ships** |
 | `dinov3-l` | 256px | 303M | raced, lost |
 | `metaclip2-h` | 224px | 630.8M | raced, lost |
-| `metaclip2-giant` | 378px | 1,843.6M (92.2% of cap) | registered, legal, blocked on a code change (see [HANDOFF.md](HANDOFF.md) §0) |
+| `metaclip2-giant` | 378px | 1,843.6M (92.2% of cap) | registered, legal, blocked on a code change |
 
 `dinov2-g` (DINOv2-giant, 518px) is registered but was **not** raced — the
 paper ranks DINOv2 second-from-bottom (0.852 GenImage / 0.636 in-the-wild)
@@ -167,8 +167,7 @@ on `0.5·AUC_clean + 0.5·AUC_robust(pooled)`):
 > have since been superseded across the board.
 
 Same ordering held on the in-scope diffusion-only metric, on worst-case
-AUC, and on clean val. Full protocol and race artifacts:
-[HANDOFF.md](HANDOFF.md) §§1–2, `reports/race/`.
+AUC, and on clean val. Full protocol and race artifacts: `reports/race/`.
 
 ## Data
 
@@ -195,14 +194,14 @@ in. **SID_Set's paired real/fake split was also dropped** — its halves are
 separable at 0.93 balanced accuracy from an 8x8 greyscale thumbnail alone. Its
 *real* half was later re-added on its own as a real-domain corpus, once the
 aspect-preserving resize + square crop in `transforms.py` closed the shortcut
-the pairing exposed. Full forensics: [FINDINGS.md](FINDINGS.md).
+the pairing exposed. Full forensics: [docs/findings.md](docs/findings.md).
 
 **One corpus is quarantined, not deleted.** `gmongaras/Stable_Diffusion_3_Recaption`
 is a *recaptioning* dataset — real photographs with SD3-authored captions, not
 SD3 output. Training on 1,500 of them as AIGC cost DALL·E 2 recall 7 points
 before it was caught. It lives in `data/quarantine/` with the full evidence and
 is removed from the CLI so it cannot be pulled again. See
-[FINDINGS.md](FINDINGS.md) §2k.
+[docs/findings.md](docs/findings.md) §2k.
 
 ```bash
 uv run main.py download tiny-genimage --limit-per-split 40000
@@ -302,7 +301,7 @@ Negative means composition costs more than any single axis. It is *positive* on
 demo_val and DALL·E 3 — there, degradation moves images toward the training
 domain, so the clean view is the outlier rather than the chains.
 
-Chart: `stats/charts/07_robustness_summary.png`. Data:
+Chart: `docs/assets/charts/07_robustness_summary.png`. Data:
 `stats/robustness_summary.csv`, `stats/per_view_auc.csv`. The 18-view grid runs
 on a 2,000-row sample of demo_val and a 4,000-row sample of ood; full-tier clean
 AUC is unchanged.

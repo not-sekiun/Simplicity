@@ -12,7 +12,7 @@ Full brief digest, setup steps, and command reference: see `README.md`.
 This file is the concise "what's built and why" map for picking the
 project back up.
 
-**Read [FINDINGS.md](FINDINGS.md) before touching training data or
+**Read [docs/findings.md](docs/findings.md) before touching training data or
 interpreting any metric.** It documents two label shortcuts found in
 SID_Set (one fixed, one fatal), the cross-source transfer test that
 exposed them, and why a high AUC on this project is evidence of a leak
@@ -100,14 +100,14 @@ DALL·E Advanced, self-reported eval only).
 **CIFAKE and SID_Set were both dropped from training** — SID_Set carries
 a composition shortcut (0.93 balanced accuracy from an 8x8 greyscale
 thumbnail; a SID_Set-trained head transfers to CIFAKE at chance) and
-CIFAKE measured as actively harmful. See FINDINGS.md sections 1 and 2d.
+CIFAKE measured as actively harmful. See docs/findings.md sections 1 and 2d.
 The images may still be on disk; the manifests do not reference them.
 
 **Model bring-up:** only `pe-core-l` has been run end to end —
 `models/pe-core-l__linear.pt`, demo-val AUC 0.9949 / FPR 0.019. The other
 three backbones are wired but not yet raced; do that on
 `--sample-rows 2000` against the grid, not on clean AUC (val is saturated
-at 0.9996). See FINDINGS.md section 7.
+at 0.9996). See docs/findings.md section 7.
 
 **Not built yet:**
 - Inference script emitting `{image_path, pred}` JSON (required deliverable)
@@ -142,7 +142,7 @@ at 0.9996). See FINDINGS.md section 7.
   backbones want 224 / 256 / 336 / 518, and normalisation stats come from
   each backbone's own config, not ImageNet.
 - **A high AUC on this project is evidence of a leak, not success.** Always
-  run cross-source transfer before believing a number. See FINDINGS.md.
+  run cross-source transfer before believing a number. See docs/findings.md.
 - The augmentation parameter table (JPEG q90/70/50/30, blur σ0.5/1/2, resize
   0.5x/0.25x, noise σ0.02/0.05/0.10, color jitter ±20%, center crop 80%) is
   fixed by the brief — see `transforms.py`'s module docstring.
@@ -163,3 +163,14 @@ at 0.9996). See FINDINGS.md section 7.
   Fine in docstrings/comments, just not stdout.
 - CSV manifests always use columns `image_path,label,source`; label is
   `0`=real, `1`=AIGC (`aigc_detect.config.LABEL_REAL`/`LABEL_AIGC`).
+
+## Working conventions
+
+- **uv-managed** project — always run code as `uv run main.py ...` or
+  `uv run python ...`, never a bare `python`/`pip` call.
+- `data/` is gitignored and mostly not present after a fresh clone; don't
+  assume downloaded datasets exist without checking (`uv run main.py
+  check-env` reports what's there).
+- Post-hackathon research testbed (the submission itself is tagged
+  `hackathon-final`). Keep commits small and scoped to what was asked;
+  don't rewrite history unprompted.

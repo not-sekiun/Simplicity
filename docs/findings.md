@@ -1326,7 +1326,7 @@ the **same dataset family the paper trains on**.
       training trades robustness away for clean accuracy**; the gain is
       augmentation, not budget.
 
-      Full detail and per-view tables in NARRATIVE.md Run 5.
+      Full detail and per-view tables in experiments.md Run 5.
 
 - [x] **Chained views in TRAINING** — DONE 2026-08-29 (Run 6).
       `TRAIN_CHAIN_SPECS` adds four training-only chains, disjoint from the
