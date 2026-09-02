@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.0.1
       # Deliberately not a `uv sync`: ruff needs nothing from this project's
       # dependency tree, so this job answers in ~11s and does not wait on the
       # test job's install to tell you about a lint error.
@@ -56,7 +56,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v10
+      # Exact tag, not @v10: setup-uv publishes floating major aliases
+      # only through v7, so `@v10` does not resolve at all.
+      - uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
