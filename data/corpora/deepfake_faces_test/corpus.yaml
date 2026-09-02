@@ -1,8 +1,8 @@
 id: deepfake_faces_test
 audit:
   n: 400
-  balanced_acc: 0.5435
-  roc_auc: 0.5268
+  balanced_acc: 0.514
+  roc_auc: 0.487
   skipped: false
   suspect: false
   threshold: 0.7

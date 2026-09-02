@@ -147,17 +147,35 @@ def _pull_simple(source, dest: CorpusPaths, state: PullState) -> PullResult:
             if min(img.size) < quality_gate["min_side"]:
                 small += 1
                 continue
+            # MONOCHROME IS COUNTED, NOT DROPPED. This used to `continue`, and
+            # that was over-fitted to the incident that produced it: the
+            # Depth Anything mirror was ~100% mode=L at saturation 0.000, a
+            # CORPUS-level property, and the abort below is what catches it.
+            # Discarding individual images contributed nothing to that catch
+            # and cost real data -- on the first corpus pulled after the rule
+            # existed it dropped 19 images, 16 monochrome AI art and 3 real
+            # black-and-white photographs, and zero depth maps. Greyscale is
+            # legitimate content a deployed detector meets; a training set
+            # that excludes it is narrower than the world it is scored in.
+            #
+            # WHAT REPLACES THE DROP IS VISIBILITY, NOT NOTHING. Greyscale can
+            # still become a LABEL-correlated cue, and the blind probe cannot
+            # see that one -- probe.py converts to L, so colour is gone before
+            # it looks, the same structural blindness that lets an aspect-ratio
+            # shortcut through. `aigc corpus audit` reports saturation per
+            # label so a skew is legible; see scripts/audit_corpora.py.
             if source_mode in {"L", "1", "I", "F", "I;16"} or _mean_saturation(img) < quality_gate["min_saturation"]:
                 mono += 1
                 if scanned >= quality_gate["min_scanned_before_abort"] and mono / scanned > quality_gate[
-                    "max_reject_fraction"
+                    "max_mono_fraction"
                 ]:
                     raise SystemExit(
                         f"[pull] ABORT: {mono:,}/{scanned:,} images from {cfg['repo']} are greyscale. "
-                        f"This mirror is probably not what it claims to be -- see sources.yaml's "
-                        f"quality_gate comment before retrying."
+                        f"A corpus that is mostly monochrome is probably not what it claims to be -- "
+                        f"see sources.yaml's quality_gate comment before retrying.\n"
+                        f"        {kept:,} rows are already indexed and are NOT trustworthy: discard "
+                        f"them with `aigc pull run {source.id} --force` once the source is fixed."
                     )
-                continue
             if max(img.size) > quality_gate["max_side"]:
                 from PIL import Image
 
@@ -183,7 +201,7 @@ def _pull_simple(source, dest: CorpusPaths, state: PullState) -> PullResult:
     writer.finish(rows_scanned=scanned, cursor={}, completed=completed)
     return PullResult(rows_written=state.rows_written, rows_scanned=state.rows_scanned,
                       resumed=resumed, completed=completed,
-                      note=f"{small:,} too small, {mono:,} greyscale/mono, {bad:,} unreadable, this run")
+                      note=f"{small:,} too small, {mono:,} greyscale/mono (kept), {bad:,} unreadable, this run")
 
 
 def _existing_quota_counts(dest: CorpusPaths, generator_field_present: bool) -> tuple[Counter, int]:

@@ -23,14 +23,27 @@
 #                          detector can read instead of content -- see
 #                          download_aigc_modern.py / download_tiny_genimage.py.
 #   quality_gate            {min_side, max_side, min_saturation,
-#                          max_reject_fraction, min_scanned_before_abort} --
+#                          max_mono_fraction, min_scanned_before_abort} --
 #                          lifted from download_real_domains.py /
-#                          download_aigc_modern.py. min_saturation is the
-#                          check that caught a depth-map mirror silently
-#                          replacing 4,000 "real" photos (see the comment
-#                          on `pexels` below); max_reject_fraction is the
-#                          corpus-level abort so a wrong mirror fails loudly
-#                          instead of quietly keeping whatever clears the gate.
+#                          download_aigc_modern.py.
+#
+#                          min_side / max_side DO filter: too small is
+#                          discarded, too large is downscaled.
+#
+#                          min_saturation DOES NOT FILTER. It defines what
+#                          counts as monochrome for max_mono_fraction, which
+#                          is a CORPUS-level canary: a mirror that is mostly
+#                          greyscale is probably not what it claims to be,
+#                          and that is what caught the depth-map mirror
+#                          silently replacing 4,000 "real" photos (see the
+#                          `pexels` comment below). That mirror was ~100%
+#                          mode=L at saturation 0.000, so the canary alone
+#                          catches it. Individual greyscale images are KEPT
+#                          -- black-and-white photography and monochrome AI
+#                          art are real content a detector meets, and
+#                          dropping them narrowed the training set without
+#                          catching anything. See hf.py for the measurement
+#                          that settled it.
 #
 # EXCLUDED ON PURPOSE: `sd3` (provenance.repo: unrecorded in corpora.yaml --
 # there is nothing here to write down; see data/sources.py's module docstring).
@@ -131,7 +144,7 @@ sources:
       min_side: 384
       max_side: 1536
       min_saturation: 0.02
-      max_reject_fraction: 0.5
+      max_mono_fraction: 0.5
       min_scanned_before_abort: 200
     license: unverified
 
@@ -149,7 +162,7 @@ sources:
       min_side: 384
       max_side: 1536
       min_saturation: 0.02
-      max_reject_fraction: 0.5
+      max_mono_fraction: 0.5
       min_scanned_before_abort: 200
     license: unverified
 
@@ -167,7 +180,7 @@ sources:
       min_side: 384
       max_side: 1536
       min_saturation: 0.02
-      max_reject_fraction: 0.5
+      max_mono_fraction: 0.5
       min_scanned_before_abort: 200
     license: unverified
 
@@ -254,7 +267,7 @@ sources:
       min_side: 384
       max_side: 1536
       min_saturation: 0.02
-      max_reject_fraction: 0.5
+      max_mono_fraction: 0.5
       min_scanned_before_abort: 200
     license: unverified
 
@@ -331,7 +344,7 @@ sources:
       # download_real_domains.py's MAX_SIDE comment.
       max_side: 1536
       min_saturation: 0.02
-      max_reject_fraction: 0.5
+      max_mono_fraction: 0.5
       min_scanned_before_abort: 200
     license: unverified
     notes: >
@@ -374,7 +387,7 @@ sources:
       min_side: 256
       max_side: 1024
       min_saturation: 0.02
-      max_reject_fraction: 0.5
+      max_mono_fraction: 0.5
       min_scanned_before_abort: 200
     license: unverified
 
@@ -393,6 +406,6 @@ sources:
       min_side: 256
       max_side: 1024
       min_saturation: 0.02
-      max_reject_fraction: 0.5
+      max_mono_fraction: 0.5
       min_scanned_before_abort: 200
     license: unverified
