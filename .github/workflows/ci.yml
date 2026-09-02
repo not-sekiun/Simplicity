@@ -18,9 +18,11 @@
 #
 # THE TORCH DOWNLOAD IS DELIBERATE. pyproject pins torch to the cu130 index,
 # and `uv sync` here honours that rather than quietly resolving a CPU build:
-# CI should install what a contributor's machine installs. It is a slow first
-# run and a cached one after; if that ever stops being worth it, the fix is a
-# cpu/cu130 extra pair in pyproject, not a divergent install here.
+# CI installs what a contributor's machine installs. This was written expecting
+# it to be the slow step and it is not -- the first run, on an empty cache,
+# resolved and installed the whole tree in 29 seconds. So there is no reason to
+# reach for a cpu/cu130 extra pair in pyproject to make CI cheaper; if that
+# changes, that pair is the fix, not a divergent install here.
 
 name: ci
 
@@ -41,27 +43,33 @@ jobs:
     name: ruff
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
       # Deliberately not a `uv sync`: ruff needs nothing from this project's
-      # dependency tree, and running it standalone means a formatting mistake
-      # is reported in seconds instead of after a multi-gigabyte install.
+      # dependency tree, so this job answers in ~11s and does not wait on the
+      # test job's install to tell you about a lint error.
       - run: uvx --from 'ruff>=0.16' ruff check .
 
   test:
     name: pytest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v10
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
-      - uses: actions/setup-node@v4
+      # 22, not the runner default: `npm test` in demo/extension was written
+      # against a dev machine running Node 24, and the FIRST CI run caught the
+      # difference -- its test script globbed `test/**/*.test.js`, which Node
+      # expands itself only from 22 onward and Node 20 passed through as a
+      # literal path. The script no longer globs, so this pin is belt and
+      # braces rather than the fix.
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: demo/extension/package-lock.json
 
