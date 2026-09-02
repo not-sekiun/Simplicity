@@ -67,12 +67,26 @@ src/aigc_detect/
     transforms.py                The brief's exact 5.2 transform table — don't
                                    change parameter values without checking it.
     dataset.py                   ManifestImageDataset: CSV -> (tensor, label)
+  cache/                       The content-addressed embedding store (tier 4).
+    hashing.py                   blake2b-128 of a file's bytes = its image id,
+                                   memoised as (path, mtime, size) -> id.
+    store.py                     256 float16 shards per (backbone, view) + a WAL
+                                   SQLite index. missing/put_batch/gather/merge,
+                                   drop/compact. Bytes fsync BEFORE the index
+                                   commits -- that order is load-bearing.
+    identity.py                  bb_id for a backbone without loading 1.2 GB of
+                                   weights, using the store's own table as memo.
+    migrate.py                   Folds the legacy .npz caches in.
+    verify.py                    Re-embeds a sample and compares by cosine.
+    export.py                    index.csv (+ .npy) for eyeballing.
   embed/
     embeddings.py                One pooled embedding per image, cached .npz
-    views.py                     One .npz per ROBUSTNESS VIEW (18: clean + 14
+    views.py                     Every ROBUSTNESS VIEW (18: clean + 14
                                    single-transform + 3 chained) from a single
-                                   decode. Read its docstring before touching
-                                   seeding or cache keys.
+                                   decode, written to the cache/ store. The .npz
+                                   files are a manifest-ordered PROJECTION of it,
+                                   rebuildable with no GPU. Read its docstring
+                                   before touching seeding or cache keys.
   train/probe.py               Paper recipe on cached embeddings
   evaluation/
     grid.py                      Per-view AUC/BAcc at one fixed threshold,
@@ -82,9 +96,9 @@ src/aigc_detect/
 scripts/                       Ad-hoc corpus pulls and one-off drivers. Being
                                  replaced tier by tier (see below), NOT deleted
                                  ahead of their replacements.
-tests/                         CLI contract + config surface. Written against
-                                 the invocation, not import paths, so they
-                                 survive code moving.
+tests/                         Cache-store invariants, CLI contract, config
+                                 surface. Written against the invocation, not
+                                 import paths, so they survive code moving.
 docs/                          findings, experiments, data, transforms, archive/
 data/                          Gitignored. $AIGC_DATA_ROOT-relocatable.
 ```
@@ -116,17 +130,38 @@ ten unseen), `wildrf_test` (real social-media re-encoding), and
 robustness grid, error analysis, the deliverable inference script, and the
 demo server + Chrome extension.
 
-**Refactor progress:** Tiers 0–3 are done — safety net, docs consolidation,
-a 35 GB disk scrub, the package restructure, and this config package. The
-remaining tiers, in order:
+**Refactor progress:** Tiers 0–4 are done — safety net, docs consolidation,
+a 35 GB disk scrub, the package restructure, the config package, and the
+content-addressed cache.
 
-- **4 — content-addressed cache.** The current cache is keyed on a SHA1 of
-  *absolute image paths*, so renaming the repo invalidates all 274 caches and
-  a re-encoded image is served stale. `scripts/worker.py` documents this as a
-  rule people must obey ("THE REPO PATH MUST MATCH"). Replacing it with
-  content hashes plus a SQLite index removes the rule, not just the bug.
+**Tier 4, what changed and what it costs you.** An embedding is identified by
+(image bytes, backbone, view spec) and nothing else — not the path, not the row
+order, not which manifest asked for it. `embed-views` now writes every vector to
+the store and treats `data/embeddings/*.npz` as a projection of it, so:
+
+- a killed run resumes from the last committed batch instead of restarting;
+- re-encoding one image costs one forward pass, not one whole file;
+- moving the repo, or rebuilding an .npz, costs a gather and no GPU;
+- two machines merge with `aigc cache merge` — `scripts/worker.py`'s
+  "THE REPO PATH MUST MATCH" rule is gone, not merely documented.
+
+The migration imported 695,321 vectors (1.4 GB) of existing GPU work.
+`aigc cache verify` re-embeds a sample and confirms it, and an .npz rebuilt from
+the store alone is bit-identical to the one it replaced.
+
+**The one thing it invalidated:** stochastic views (`noise_*`, `color_jitter`,
+`chain_medium`, `chain_heavy`, `trainchain_*`) were seeded on the image's
+*absolute path*, so a rename silently redrew every noise realization. They are
+now seeded on the content id, which makes the ~725k path-seeded vectors
+unreproducible by construction — they were deliberately not migrated. Those
+views recompute on their next `embed-views` run (resumable, and only the gaps);
+deterministic views were never affected. `eval-grid` will report a stochastic
+view as STALE until it is re-run.
+
+The remaining tiers, in order:
+
 - **5 — data hierarchy and manifest recipes**, then the image-level prune
-  that has to wait for tier 4 (the migration hashes files the prune deletes).
+  that tier 4 had to precede (the migration hashes files the prune deletes).
 - **6 — a source registry and resumable fetchers**, replacing the six ad-hoc
   `download_*.py` scripts, with the blind-probe audit as a gate on every pull.
 - **7 — experiment configs and a model bundle** carrying its own threshold;

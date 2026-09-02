@@ -23,8 +23,21 @@ property: every view of an image provably derives from identical source pixels,
 and one pass writes every view's cache, so no view can be quietly out of date
 relative to its siblings.
 
-Cache location: data/embeddings/<backbone>__<stem>__<view>.npz, where <stem> is
-the manifest stem plus a subsample tag (see `cache_stem`).
+WHERE THE VECTORS LIVE (Tier 4). The content-addressed store is authoritative:
+every vector is written to the store under (backbone id, view id, image content
+id), and `data/embeddings/<backbone>__<stem>__<view>.npz` is a *projection* of
+it in manifest order, kept because every reader in the project still loads that
+shape. Three consequences follow, and they are the point of the tier:
+
+  - RESUMABLE. Each batch is committed durably before the next one runs, so a
+    killed run restarts by asking the store which ids are absent. It does not
+    begin again.
+  - INCREMENTAL. Re-encode one image and exactly one content id changes, so
+    exactly one forward pass runs. The .npz alone could only say "this whole
+    file is stale".
+  - FREE RE-PROJECTION. Rebuilding an .npz whose rows are all in the store costs
+    a gather, not a GPU. Moving the repo, or rebuilding a split, no longer costs
+    hours -- which is what makes the Tier 5 corpus move affordable at all.
 
 DETERMINISM (FINDINGS trap 10). Several views are random by construction:
 `color_jitter` samples fresh brightness/contrast/saturation factors per call,
@@ -33,14 +46,22 @@ For a cached eval set that is a correctness problem -- re-running would score a
 different test, and two backbones raced against each other would not face the
 same images.
 
-Every stochastic view is therefore seeded, and seeded **on the image's path**,
-not on its row index (`SEED_SCHEME`). Index seeding was the obvious choice and
-is wrong for the workflow this module is actually used in: a 2,000-row
-stratified subsample gives every image a different row index than the full
-manifest does, so the same photo would get a different noise realization in the
-subsample than in the full run. The subsample's numbers would then differ from
-the full run's for a reason that looks exactly like a real effect. Keyed on the
-path, an image's degradations are the same wherever it appears.
+Every stochastic view is therefore seeded, and seeded **on the image's content
+id**, not on its row index and no longer on its path (`SEED_SCHEME`). Index
+seeding was the obvious choice and is wrong for the workflow this module is
+actually used in: a 2,000-row stratified subsample gives every image a different
+row index than the full manifest does, so the same photo would get a different
+noise realization in the subsample than in the full run. The subsample's numbers
+would then differ from the full run's for a reason that looks exactly like a
+real effect.
+
+Path seeding fixed that and carried its own version of the same defect one level
+down: renaming the repository silently redrew every noise realization, so the
+"same" eval set was quietly a different test. Seeding on content makes an
+image's degradations a property of the image, which is the only thing they were
+ever meant to be. It also, unavoidably, makes every path-seeded vector
+unreproducible -- which is why the Tier 4 migration deliberately did not import
+them.
 
 CACHE KEYING (FINDINGS trap 7, extended twice).
 
@@ -69,7 +90,10 @@ from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-from aigc_detect.config import EMBEDDINGS_DIR, RANDOM_SEED, ROOT_DIR
+from aigc_detect.cache.hashing import HashCache
+from aigc_detect.cache.identity import identity_from_module
+from aigc_detect.cache.store import EmbeddingStore, view_id
+from aigc_detect.config import EMBEDDINGS_DIR, RANDOM_SEED, ROOT_DIR, get_settings
 from aigc_detect.data.dataset import ManifestImageDataset
 from aigc_detect.data.transforms import (
     build_robustness_views,
@@ -77,12 +101,20 @@ from aigc_detect.data.transforms import (
     train_chain_view_names,
 )
 from aigc_detect.embed.embeddings import fingerprint_paths
+from aigc_detect.log import get_logger
 from aigc_detect.registry.backbones import load_backbone
+
+logger = get_logger(__name__)
 
 # Bumped only if the *seeding scheme* changes. Folded into the fingerprint of
 # stochastic views only -- a deterministic view's output does not depend on it,
 # so bumping this must not invalidate `clean`, `jpeg_*`, `blur_*` etc.
-SEED_SCHEME = "path-v1"
+#
+# path-v1 -> content-v1 at Tier 4. Every stochastic vector computed under
+# path-v1 is now unreproducible, by design: its seed came from a string the
+# refactor is in the business of making irrelevant. Those views recompute; the
+# deterministic ones, which never depended on this, do not.
+SEED_SCHEME = "content-v1"
 
 
 def cache_stem(manifest_path: str | Path, limit: int | None = None, sample_rows: int | None = None) -> str:
@@ -174,11 +206,25 @@ def load_view_cache(
     return embeddings, labels, meta
 
 
-def _view_seed(image_path: str, view: str) -> int:
-    """Stable per-(image, view) seed. Derived from a hash of the path rather
-    than from the row index, so an image's degradations do not change when it
-    appears in a different subsample -- see the module docstring."""
-    h = hashlib.sha1(f"{image_path}::{view}::{SEED_SCHEME}".encode("utf-8", "replace")).digest()
+def resolve_image_path(raw: str | Path) -> Path:
+    """A manifest path as this module opens it: relative entries hang off ROOT_DIR.
+
+    Hashing and decoding must agree on which file a row names, so both go
+    through here rather than each re-deriving the rule.
+    """
+    p = Path(str(raw))
+    return p if p.is_absolute() else ROOT_DIR / p
+
+
+def view_seed(image_id: str, view: str) -> int:
+    """Stable per-(image, view) seed, derived from the image's CONTENT id.
+
+    Not the row index (a subsample would redraw every realization) and no longer
+    the path (a repo rename would redraw every realization). An image's
+    degradations are now a property of its bytes, so they are the same in every
+    subsample, on every machine, at every path -- see the module docstring.
+    """
+    h = hashlib.sha1(f"{image_id}::{view}::{SEED_SCHEME}".encode("utf-8", "replace")).digest()
     return int.from_bytes(h[:4], "little")
 
 
@@ -242,32 +288,39 @@ def select_rows(
 
 
 class MultiViewDataset(Dataset):
-    """Yields (views, label) where views is a (n_views, 3, S, S) tensor built
-    from a SINGLE decode of the source image."""
+    """Yields (views, label, idx) where views is a (n_views, 3, S, S) tensor
+    built from a SINGLE decode of the source image.
 
-    def __init__(self, df: pd.DataFrame, pipelines: dict):
+    `idx` is returned so the writer can name the rows a batch corresponds to
+    without relying on the loader's ordering. It is redundant today (shuffle is
+    off) and it is one assumption fewer standing between a forward pass and the
+    content id its vector gets filed under.
+    """
+
+    def __init__(self, df: pd.DataFrame, pipelines: dict, img_ids: list[str]):
         self.df = df.reset_index(drop=True)
         self.view_names = list(pipelines.keys())
         self.pipelines = pipelines
+        if len(img_ids) != len(self.df):
+            raise ValueError(f"[embed-views] {len(img_ids)} ids for {len(self.df)} rows")
+        self.img_ids = img_ids
 
     def __len__(self) -> int:
         return len(self.df)
 
     def __getitem__(self, idx: int):
         row = self.df.iloc[idx]
-        raw_path = str(row["image_path"])
-        p = Path(raw_path)
-        img = Image.open(p if p.is_absolute() else ROOT_DIR / p).convert("RGB")  # ONE decode
+        img = Image.open(resolve_image_path(row["image_path"])).convert("RGB")  # ONE decode
 
         tensors = []
         for name in self.view_names:
-            # Seeded per (image path, view): color_jitter, the noise views and
+            # Seeded per (content id, view): color_jitter, the noise views and
             # two of the chains are random by construction, and a cached eval
-            # set must be reproducible across runs, workers, backbones -- and
-            # across subsamples (see the module docstring).
-            torch.manual_seed(_view_seed(raw_path, name))
+            # set must be reproducible across runs, workers, backbones, machines
+            # -- and across subsamples (see the module docstring).
+            torch.manual_seed(view_seed(self.img_ids[idx], name))
             tensors.append(self.pipelines[name](img))
-        return torch.stack(tensors), int(row["label"])
+        return torch.stack(tensors), int(row["label"]), idx
 
 
 def precompute_view_embeddings(
@@ -358,98 +411,210 @@ def precompute_view_embeddings(
     elif limit is not None:
         print(f"[embed-views] --limit {limit} applied -- using first {n} of the manifest's rows")
 
-    # Skip views already cached against BOTH fingerprints; recompute the rest.
-    todo: dict = {}
-    for name, pipe in all_pipelines.items():
-        v_fp = view_fingerprint(all_specs[name])
-        out = view_embeddings_path(backbone_key, stem, name)
-        if out.exists() and not force:
-            try:
-                with np.load(out, allow_pickle=True) as d:
-                    ok = (
-                        str(d["manifest_fingerprint"]) == m_fp
-                        and "view_fingerprint" in d
-                        and str(d["view_fingerprint"]) == v_fp
+    if dtype == "float32":
+        logger.warning(
+            "--dtype float32 controls the .npz container only; the store holds float16. "
+            "Under AMP that is lossless (max |f32-f16| == 0 on this pipeline), but a CPU "
+            "run without autocast would be widened back from fp16, not recovered."
+        )
+
+    cache_root = get_settings().cache_root
+    with (
+        EmbeddingStore(cache_root / "embeddings") as store,
+        HashCache(cache_root / "hashes.sqlite") as hashes,
+    ):
+        ident = identity_from_module(backbone_key, module, pooled_dim, native_res)
+        ident.register(store)
+
+        # One stat() per file, and a read only for files the memo has not seen.
+        img_ids = hashes.ids_for(
+            [resolve_image_path(v) for v in df["image_path"]], progress=True
+        )
+        n_unique = len(set(img_ids))
+        if n_unique != n:
+            # Duplicate BYTES under different paths. Worth saying out loud: the
+            # store computes each once, so the forward-pass count will not match
+            # the row count, and that is not a bug.
+            logger.info("%d of %d rows are byte-duplicates; each is embedded once", n - n_unique, n)
+
+        vids: dict[str, str] = {}
+        for name in all_pipelines:
+            spec = all_specs[name]
+            scheme = SEED_SCHEME if "|stochastic" in spec else None
+            vid = view_id(name, spec, scheme)
+            store.register_view(vid, name=name, spec=spec, seed_scheme=scheme)
+            vids[name] = vid
+
+        if force:
+            for name, vid in vids.items():
+                dropped = store.drop(ident.bb_id, vid, img_ids)
+                if dropped:
+                    logger.info("--force: dropped %s stored rows for view '%s'", f"{dropped:,}", name)
+
+        # THE ONLY QUESTION THAT COSTS GPU: which (view, image) pairs are absent.
+        # Not "is this file stale" -- a manifest that gained ten rows now costs
+        # ten forward passes, and a repo that moved costs none.
+        gaps = {name: store.missing(ident.bb_id, vid, img_ids) for name, vid in vids.items()}
+        compute = {name: pipe for name, pipe in all_pipelines.items() if gaps[name]}
+
+        if compute:
+            wanted = set().union(*(set(gaps[name]) for name in compute))
+            # First row per absent id: a byte-duplicate does not earn a second
+            # forward pass just because it appears twice in the manifest.
+            first_row: dict[str, int] = {}
+            for row_i, iid in enumerate(img_ids):
+                if iid in wanted and iid not in first_row:
+                    first_row[iid] = row_i
+            rows = sorted(first_row.values())
+            sub_df = df.iloc[rows].reset_index(drop=True)
+            sub_ids = [img_ids[i] for i in rows]
+
+            view_names = list(compute)
+            print(f"[embed-views] manifest={manifest_path} stem={stem} rows={n} views={len(all_pipelines)}")
+            print(f"[embed-views] computing {len(view_names)} view(s): {', '.join(view_names)}")
+            print(
+                f"[embed-views] {len(rows):,} of {n:,} rows are missing from the store -- "
+                f"{len(rows) * len(view_names):,} forward passes from {len(rows):,} decodes"
+            )
+            for name in view_names:
+                if len(gaps[name]) != len(rows):
+                    print(f"[embed-views]   {name}: {len(gaps[name]):,} missing")
+
+            loader = DataLoader(
+                MultiViewDataset(sub_df, compute, sub_ids),
+                batch_size=batch_size, shuffle=False, num_workers=num_workers,
+            )
+            device = next(module.parameters()).device
+            use_amp = device.type == "cuda"
+            committed = 0
+            with torch.no_grad():
+                for batched_views, _labels, idx in tqdm(loader, desc=f"[embed-views] {backbone_key}"):
+                    b, v = batched_views.shape[0], batched_views.shape[1]
+                    flat = batched_views.reshape(b * v, *batched_views.shape[2:]).to(
+                        device, non_blocking=True
                     )
-            except Exception:
-                ok = False
-            if ok:
-                print(f"[embed-views] {out.name} matches the manifest and view spec -- skipping")
-                continue
-            print(f"[embed-views] {out.name} is STALE -- recomputing")
-        todo[name] = pipe
+                    with torch.autocast(device_type="cuda", enabled=use_amp):
+                        feats = module(flat)
+                    feats = feats.float().cpu().numpy().reshape(b, v, pooled_dim)
+                    batch_ids = [sub_ids[j] for j in idx.tolist()]
+                    # Committed per batch, not per run: this is the whole of
+                    # "resume". Kill the process here and everything up to the
+                    # last batch survives.
+                    for i, name in enumerate(view_names):
+                        committed += store.put_batch(ident.bb_id, vids[name], batch_ids, feats[:, i, :])
+            print(f"[embed-views] committed {committed:,} vectors to the store")
+        else:
+            print("[embed-views] every requested view is already in the store -- no forward passes")
 
-    if not todo:
-        print("[embed-views] every requested view is already cached and current -- nothing to do")
-        return [view_embeddings_path(backbone_key, stem, v) for v in all_pipelines]
+        return _project_to_npz(
+            store=store, ident=ident, vids=vids, specs=all_specs, views=list(all_pipelines),
+            backbone_key=backbone_key, stem=stem, manifest_path=manifest_path, df=df,
+            img_ids=img_ids, m_fp=m_fp, module=module, native_res=native_res,
+            pooled_dim=pooled_dim, sample_rows=sample_rows, sample_seed=sample_seed,
+            dtype=dtype, force=force, recomputed=set(compute),
+        )
 
-    view_names = list(todo)
-    ds = MultiViewDataset(df, todo)
-    print(f"[embed-views] manifest={manifest_path} stem={stem} rows={n} views={len(view_names)}")
-    print(f"[embed-views] computing: {', '.join(view_names)}")
-    print(f"[embed-views] {n * len(view_names):,} forward passes from {n:,} decodes")
 
-    loader = DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
-    device = next(module.parameters()).device
-    use_amp = device.type == "cuda"
-    np_dtype = np.float16 if dtype == "float16" else np.float32
+def _npz_is_current(path: Path, m_fp: str, v_fp: str) -> bool:
+    """Does this .npz already describe exactly this row selection and view spec?
 
-    out_arrays = {v: np.empty((n, pooled_dim), dtype=np_dtype) for v in view_names}
-    all_labels = np.empty((n,), dtype=np.int64)
+    A corrupt or truncated file answers False rather than raising: the only
+    consequence of rebuilding one is a gather, which is now cheap.
+    """
+    if not path.exists():
+        return False
+    try:
+        with np.load(path, allow_pickle=True) as d:
+            return (
+                str(d["manifest_fingerprint"]) == m_fp
+                and "view_fingerprint" in d
+                and str(d["view_fingerprint"]) == v_fp
+            )
+    except Exception:
+        return False
 
-    offset = 0
-    with torch.no_grad():
-        for batched_views, labels in tqdm(loader, desc=f"[embed-views] {backbone_key}"):
-            b, v = batched_views.shape[0], batched_views.shape[1]
-            flat = batched_views.reshape(b * v, *batched_views.shape[2:]).to(device, non_blocking=True)
-            with torch.autocast(device_type="cuda", enabled=use_amp):
-                feats = module(flat)
-            feats = feats.float().cpu().numpy().reshape(b, v, pooled_dim)
-            for i, name in enumerate(view_names):
-                out_arrays[name][offset : offset + b] = feats[:, i, :].astype(np_dtype)
-            all_labels[offset : offset + b] = labels.numpy()
-            offset += b
 
-    sources = np.array(ds.df["source"].tolist(), dtype=str)
+def _project_to_npz(
+    *, store, ident, vids, specs, views, backbone_key, stem, manifest_path, df, img_ids,
+    m_fp, module, native_res, pooled_dim, sample_rows, sample_seed, dtype, force, recomputed,
+) -> list[Path]:
+    """Write the manifest-ordered .npz view of what the store holds.
+
+    The store is authoritative; this is the shape every reader in the project
+    still expects (`load_view_cache`, the grid, the trainer, error analysis).
+    Keeping it means Tier 4 changes how vectors are addressed without touching a
+    single consumer -- the readers move in Tier 7, on their own schedule.
+
+    Rebuilding one costs a gather. That is the point: after the Tier 5 corpus
+    move every fingerprint here changes and every file below is rewritten, with
+    no GPU involved at all.
+    """
+    EMBEDDINGS_DIR.mkdir(parents=True, exist_ok=True)
+
+    labels = df["label"].to_numpy(dtype=np.int64)
+    sources = np.array(df["source"].astype(str).tolist(), dtype=str)
     # Tiny-GenImage carries a per-image generator tag; keep it so the grid can
     # be broken down by generator without re-reading the manifest.
     generators = (
-        np.array(ds.df["generator"].astype(str).tolist(), dtype=str)
-        if "generator" in ds.df.columns
-        else np.array([""] * n, dtype=str)
+        np.array(df["generator"].astype(str).tolist(), dtype=str)
+        if "generator" in df.columns
+        else np.array([""] * len(df), dtype=str)
     )
-    paths = np.array(ds.df["image_path"].astype(str).tolist(), dtype=str)
+    paths = np.array(df["image_path"].astype(str).tolist(), dtype=str)
+    np_dtype = np.float16 if dtype == "float16" else np.float32
 
-    EMBEDDINGS_DIR.mkdir(parents=True, exist_ok=True)
-    written = []
-    for name in view_names:
+    written: list[Path] = []
+    rebuilt: list[Path] = []
+    for name in views:
         out = view_embeddings_path(backbone_key, stem, name)
+        v_fp = view_fingerprint(specs[name])
+        if name not in recomputed and not force and _npz_is_current(out, m_fp, v_fp):
+            print(f"[embed-views] {out.name} matches the manifest and view spec -- skipping")
+            written.append(out)
+            continue
+
+        matrix, missing = store.gather(ident.bb_id, vids[name], img_ids)
+        if missing:
+            raise SystemExit(
+                f"[embed-views] {len(missing)} of {len(img_ids)} rows for view '{name}' are "
+                f"absent from the store after the compute pass. This should not happen; the "
+                f"store may be damaged. Check: uv run aigc cache status"
+            )
         np.savez(
             out,
-            embeddings=out_arrays[name],
-            labels=all_labels,
+            embeddings=matrix.astype(np_dtype),
+            labels=labels,
             sources=sources,
             generators=generators,
             image_paths=paths,
+            image_ids=np.array(img_ids, dtype=str),
             view=name,
-            view_spec=all_specs[name],
+            view_spec=specs[name],
             backbone=backbone_key,
             checkpoint=module.checkpoint_used,
+            bb_id=ident.bb_id,
+            view_id=vids[name],
             native_res=native_res,
             pooled_dim=pooled_dim,
             manifest_path=str(manifest_path),
             cache_stem=stem,
-            n_rows=n,
+            n_rows=len(df),
             sample_rows=-1 if sample_rows is None else sample_rows,
             sample_seed=sample_seed,
             manifest_fingerprint=m_fp,
-            view_fingerprint=view_fingerprint(all_specs[name]),
+            view_fingerprint=v_fp,
             seed_scheme=SEED_SCHEME,
             norm_mean=module.norm_mean,
             norm_std=module.norm_std,
             norm_source=module.norm_source,
         )
         written.append(out)
-    total_mb = sum(p.stat().st_size for p in written) / 1e6
-    print(f"[embed-views] wrote {len(written)} views x {n} rows ({total_mb:.0f} MB) -> {EMBEDDINGS_DIR}")
+        rebuilt.append(out)
+
+    if rebuilt:
+        total_mb = sum(p.stat().st_size for p in rebuilt) / 1e6
+        print(
+            f"[embed-views] projected {len(rebuilt)} view(s) x {len(df)} rows "
+            f"({total_mb:.0f} MB) -> {EMBEDDINGS_DIR}"
+        )
     return written

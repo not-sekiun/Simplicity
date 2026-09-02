@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 from pathlib import Path
 
@@ -126,6 +127,22 @@ def view_id(name: str, spec: str, seed_scheme: str | None) -> str:
     """
     payload = spec if seed_scheme is None else f"{spec}|seed={seed_scheme}"
     return hashlib.blake2b(payload.encode(), digest_size=8).hexdigest()
+
+
+def _next_generation(out_dir: Path, shard: str) -> str:
+    """Next unused generation name for a shard being compacted.
+
+    `000` -> `000.g1` -> `000.g2`. The index stores the shard name explicitly,
+    so a rewritten shard does not have to keep the name its first byte implies;
+    that indirection is what lets the new file exist alongside the old one until
+    the index commit chooses between them.
+    """
+    base = shard.split(".")[0]
+    used = {p.stem for p in out_dir.glob(f"{base}*.f16")}
+    gen = 1
+    while f"{base}.g{gen}" in used:
+        gen += 1
+    return f"{base}.g{gen}"
 
 
 class EmbeddingStore:
@@ -237,8 +254,6 @@ class EmbeddingStore:
             with open(shard_path, "ab") as fh:
                 fh.write(block.tobytes())
                 fh.flush()
-                import os
-
                 os.fsync(fh.fileno())
             for k, (iid, _) in enumerate(items):
                 index_rows.append((bb_id, vid, iid, shard, base + k))
@@ -249,6 +264,33 @@ class EmbeddingStore:
                 index_rows,
             )
         return len(index_rows)
+
+    def drop(self, bb_id: str, vid: str, img_ids: list[str] | None = None) -> int:
+        """Forget rows, so the next run recomputes them. Returns rows removed.
+
+        Only the index entry is deleted; the vector's bytes stay in their shard
+        until `compact` runs. That is deliberate and it is the same trade the
+        write path makes -- deleting from an append-only shard would mean
+        rewriting it, and a crash mid-rewrite is the one failure this store
+        refuses to risk. `--force` therefore costs disk until compaction, never
+        correctness.
+        """
+        if img_ids is None:
+            cur = self._conn.execute("DELETE FROM rows_ WHERE bb_id=? AND view_id=?", (bb_id, vid))
+            removed = cur.rowcount
+        else:
+            removed = 0
+            unique = list(dict.fromkeys(img_ids))
+            for start in range(0, len(unique), 800):
+                batch = unique[start : start + 800]
+                q = ",".join("?" * len(batch))
+                cur = self._conn.execute(
+                    f"DELETE FROM rows_ WHERE bb_id=? AND view_id=? AND img_id IN ({q})",
+                    [bb_id, vid, *batch],
+                )
+                removed += cur.rowcount
+        self._conn.commit()
+        return removed
 
     # -- reading --------------------------------------------------------------
 
@@ -302,6 +344,106 @@ class EmbeddingStore:
         ).fetchall()
         bytes_on_disk = sum(p.stat().st_size for p in self.vec_dir.rglob("*.f16"))
         return {"rows": n_rows, "bytes": bytes_on_disk, "per_backbone_view": per}
+
+    def groups(self) -> list[tuple[str, str, str, str, int]]:
+        """(bb_id, backbone key, view_id, view name, row count) for what is stored.
+
+        The unit `export`, `verify` and `compact` all iterate over -- a
+        (backbone, view) pair is the only grouping the store has, since nothing
+        else about a vector is recorded.
+        """
+        return self._conn.execute(
+            "SELECT r.bb_id, b.key, r.view_id, v.name, COUNT(*) FROM rows_ r "
+            "JOIN backbones b ON b.bb_id = r.bb_id JOIN views v ON v.view_id = r.view_id "
+            "GROUP BY r.bb_id, r.view_id ORDER BY b.key, v.name"
+        ).fetchall()
+
+    def orphan_bytes(self) -> int:
+        """Bytes sitting in shards that no index row points at.
+
+        These accumulate exactly one way: a crash after a shard was fsync'd and
+        before its index transaction committed (see the module docstring on why
+        that is the order we chose). Counting them is cheap -- file size against
+        the indexed row count per shard -- so `status` can report the number
+        rather than leaving it to be guessed at.
+        """
+        total = 0
+        for bb_id, _key, vid, _name, _n in self.groups():
+            dim = self.backbone_dim(bb_id)
+            if not dim:
+                continue
+            used = dict(self._conn.execute(
+                "SELECT shard, COUNT(*) FROM rows_ WHERE bb_id=? AND view_id=? GROUP BY shard",
+                (bb_id, vid),
+            ))
+            out_dir = self.vec_dir / bb_id / vid
+            for shard_path in out_dir.glob("*.f16"):
+                on_disk = shard_path.stat().st_size // (dim * ITEMSIZE)
+                total += max(0, on_disk - used.get(shard_path.stem, 0)) * dim * ITEMSIZE
+        return total
+
+    def compact(self, *, dry_run: bool = False) -> dict:
+        """Rewrite shards carrying orphaned bytes, reclaiming the space.
+
+        SAFE UNDER kill -9, by the same argument as `put_batch` and in the same
+        direction. Each shard is rewritten under a NEW generation name, the
+        index is re-pointed at it in one transaction, and only then is the old
+        file unlinked. A crash before the commit leaves the new file orphaned
+        and the old one still authoritative; a crash after it leaves the old
+        file orphaned and the new one authoritative. Neither state has an index
+        row pointing at bytes that were never written, which is the one outcome
+        that would be silently wrong.
+
+        Rewriting in place would be less code and would corrupt the store on any
+        crash mid-write, since the offsets already committed in the index would
+        no longer describe the file.
+        """
+        reclaimed = 0
+        rewritten = 0
+        for bb_id, _key, vid, _name, _n in self.groups():
+            dim = self.backbone_dim(bb_id)
+            if not dim:
+                continue
+            out_dir = self.vec_dir / bb_id / vid
+            by_shard: dict[str, list[tuple[str, int]]] = {}
+            for iid, shard, off in self._conn.execute(
+                "SELECT img_id, shard, offset_ FROM rows_ WHERE bb_id=? AND view_id=?", (bb_id, vid)
+            ):
+                by_shard.setdefault(shard, []).append((iid, off))
+
+            # Driven by the FILES, not by the index: a shard every one of whose
+            # rows was dropped has no index entry left to lead us to it, and is
+            # exactly the shard with the most to reclaim.
+            for shard_path in sorted(out_dir.glob("*.f16")):
+                shard = shard_path.stem
+                items = by_shard.get(shard, [])
+                on_disk = shard_path.stat().st_size // (dim * ITEMSIZE)
+                if on_disk <= len(items):
+                    continue  # nothing orphaned in this shard
+                reclaimed += (on_disk - len(items)) * dim * ITEMSIZE
+                rewritten += 1
+                if dry_run:
+                    continue
+                if not items:
+                    shard_path.unlink()  # wholly orphaned; no index row to re-point
+                    continue
+
+                items.sort(key=lambda t: t[1])
+                data = np.fromfile(shard_path, dtype=DTYPE).reshape(-1, dim)
+                kept = np.ascontiguousarray(data[[off for _iid, off in items]])
+                new_shard = _next_generation(out_dir, shard)
+                new_path = out_dir / f"{new_shard}.f16"
+                with open(new_path, "wb") as fh:
+                    fh.write(kept.tobytes())
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                with self._conn:
+                    self._conn.executemany(
+                        "UPDATE rows_ SET shard=?, offset_=? WHERE bb_id=? AND view_id=? AND img_id=?",
+                        [(new_shard, k, bb_id, vid, iid) for k, (iid, _off) in enumerate(items)],
+                    )
+                shard_path.unlink()
+        return {"shards_rewritten": rewritten, "bytes_reclaimed": reclaimed, "dry_run": dry_run}
 
     def merge(self, other_root: str | Path) -> int:
         """Fold another store into this one (see scripts/worker.py).

@@ -51,6 +51,7 @@ def verify_sample(store, hashes, *, n_images: int = 200, seed: int = 0) -> bool:
     from PIL import Image
 
     from aigc_detect.data.transforms import build_robustness_views
+    from aigc_detect.embed.views import view_seed
     from aigc_detect.registry.backbones import load_backbone
 
     conn = store._conn
@@ -110,6 +111,13 @@ def verify_sample(store, hashes, *, n_images: int = 200, seed: int = 0) -> bool:
                 img = Image.open(paths[iid]).convert("RGB")
             except OSError:
                 continue
+            # Seed exactly as the embedder does. The noise and jitter views draw
+            # from the torch RNG, so without this a stochastic row re-embeds to a
+            # DIFFERENT realization and reports ~0.99 cosine -- a mismatch that
+            # says nothing about whether the stored vector is right. Content
+            # seeding is what makes those views checkable at all: the seed is
+            # recoverable here from the id alone, with no path and no row order.
+            torch.manual_seed(view_seed(iid, view_name))
             batch.append(pipe(img))
             kept.append(iid)
         if not batch:

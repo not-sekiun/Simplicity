@@ -10,16 +10,22 @@ the full pool) and it parallelises perfectly across machines: each (backbone,
 manifest, view) cache is independent. Head training and scoring are seconds and
 stay on one machine.
 
-THE ONE HARD CONSTRAINT: THE REPO PATH MUST MATCH.
+THE HARD CONSTRAINT, AND WHAT IS LEFT OF IT.
 
-`fingerprint_paths` hashes the manifest's `image_path` STRINGS, and this
-project's manifests store absolute paths. A cache computed under
-`D:\\work\\tiktok...` carries a different fingerprint than the same images under
-`C:\\Users\\angus\\Desktop\\tiktoktechjam2026`, and `load_view_cache` will
-correctly reject it as STALE when you copy it home. Nothing warns you until the
-work is already done, so this script refuses to run a job when the path differs.
+This script used to open with "THE REPO PATH MUST MATCH", and it meant it: the
+cache key was a hash of the manifest's absolute `image_path` STRINGS, so a run
+under `D:\\work\\tiktok...` produced vectors that `load_view_cache` correctly
+rejected as STALE the moment you copied them home. Hours of GPU, thrown away,
+with nothing warning you until it was done.
 
-Clone to the IDENTICAL absolute path on every machine. `--check` verifies it.
+Tier 4 removed that. An embedding is now keyed on the image's CONTENT, so
+vectors computed anywhere are valid everywhere and combine with `cache merge`.
+
+What still ties a worker to one path is narrower and not about the cache: the
+committed manifests name their images by absolute path, so a differing root
+means the images cannot be FOUND, not that the work would be wasted. Tier 5
+switches manifests to relative paths and this check goes away with it. Until
+then, clone to the identical absolute path; `--check` verifies it.
 
 WHY MANIFESTS ARE COMMITTED TO GIT RATHER THAN REBUILT. `main.py split` is
 seeded and deterministic, but only if it is invoked with the same flags over the
@@ -33,8 +39,15 @@ split position (`train_000123.jpg`), and the streamed slices are taken in stream
 order with shuffling off and the position baked into the filename
 (`ood_0001234.jpg`). Same commands, same files, same paths.
 
-SHIPPING RESULTS BACK: copy `data/embeddings/*.npz` for the stems you computed.
-Nothing else needs to move.
+SHIPPING RESULTS BACK: copy this machine's cache root (the `embeddings/` store
+and `hashes.sqlite`) and fold it in on the primary with
+
+    uv run aigc cache merge /path/to/the/workers/cache
+
+Only rows the primary does not already hold are copied, so a partial worker run
+is still worth shipping and re-shipping the same store twice costs nothing. The
+primary regenerates its `data/embeddings/*.npz` from the merged store with a
+plain `embed-views` re-run, which does no forward passes.
 """
 
 from __future__ import annotations
@@ -79,10 +92,13 @@ def check_root() -> bool:
     print(f"[worker] repo root : {ROOT_DIR}")
     print(f"[worker] canonical : {CANONICAL_ROOT}")
     if ok:
-        print("[worker] PATH OK -- embeddings computed here will be accepted on the primary machine.")
+        print("[worker] PATH OK -- the manifests will resolve to images on this machine.")
     else:
-        print("[worker] PATH MISMATCH. Manifests store absolute paths and the cache fingerprint")
-        print("[worker] hashes them, so anything computed here would be rejected as STALE.")
+        print("[worker] PATH MISMATCH. The committed manifests name their images by ABSOLUTE")
+        print("[worker] path, so under this root they point at files that are not there.")
+        print("[worker] (The embeddings themselves no longer care -- they are keyed on image")
+        print("[worker]  content since Tier 4, and merge across machines. This is about")
+        print("[worker]  finding the images at all, and Tier 5's relative paths retire it.)")
         print(f"[worker] Re-clone to exactly: {CANONICAL_ROOT}")
     return ok
 

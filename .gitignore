@@ -15,6 +15,9 @@ data/processed/**
 data/demo_val/**
 data/heldout/**
 data/embeddings/**
+# The content-addressed store (tier 4). Rebuildable from the images, and the
+# default $AIGC_CACHE_ROOT, so it lands inside the repo unless pointed elsewhere.
+data/cache/**
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/demo_val/.gitkeep

@@ -43,7 +43,6 @@ import argparse
 import base64
 import binascii
 import io
-import logging
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -59,6 +58,7 @@ from torchvision.transforms import v2
 
 from aigc_detect.config import ROOT_DIR
 from aigc_detect.data.transforms import build_backbone_transform
+from aigc_detect.log import configure, get_logger
 from aigc_detect.registry.backbones import load_backbone
 from aigc_detect.registry.heads import build_head
 
@@ -71,8 +71,8 @@ FETCH_HEADERS = {
 }
 _FETCH_POOL = ThreadPoolExecutor(max_workers=8)
 
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
+configure()
+logger = get_logger(__name__)
 
 class Model:
     """Loaded once at startup. Holds exactly the state predict.py's

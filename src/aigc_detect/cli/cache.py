@@ -59,6 +59,32 @@ def cmd_cache_verify(args):
     raise SystemExit(0 if ok else 1)
 
 
+def cmd_cache_export(args):
+    from aigc_detect.cache.export import export
+
+    store, hashes, _ = _open()
+    try:
+        result = export(store, args.out, vectors=args.vectors,
+                        backbone=args.backbone, view=args.view)
+    finally:
+        store.close()
+        hashes.close()
+    print(f"[cache] exported {result['rows']:,} rows from {result['groups']} "
+          f"(backbone, view) group(s) -> {result['out_dir']}")
+
+
+def cmd_cache_compact(args):
+    store, hashes, _ = _open()
+    try:
+        result = store.compact(dry_run=args.dry_run)
+    finally:
+        store.close()
+        hashes.close()
+    verb = "would reclaim" if args.dry_run else "reclaimed"
+    print(f"[cache] {verb} {result['bytes_reclaimed'] / 1e6:.1f} MB "
+          f"across {result['shards_rewritten']} shard(s)")
+
+
 def cmd_cache_merge(args):
     store, hashes, _ = _open()
     try:
@@ -90,6 +116,24 @@ def register_cache(sub):
     p_ver.add_argument("--sample", type=int, default=200, help="Images to re-embed (default 200).")
     p_ver.add_argument("--seed", type=int, default=0, help="Sampling seed.")
     p_ver.set_defaults(func=cmd_cache_verify)
+
+    p_exp = csub.add_parser(
+        "export",
+        help="Dump the index (and optionally the vectors) to CSV/npy for inspection.",
+    )
+    p_exp.add_argument("--out", required=True, help="Directory to write into (created if absent).")
+    p_exp.add_argument("--vectors", action="store_true",
+                       help="Also write one .npy matrix + ids.txt per (backbone, view) group.")
+    p_exp.add_argument("--backbone", default=None, help="Only this backbone key, e.g. pe-core-l.")
+    p_exp.add_argument("--view", default=None, help="Only this view name, e.g. clean.")
+    p_exp.set_defaults(func=cmd_cache_export)
+
+    p_cmp = csub.add_parser(
+        "compact",
+        help="Reclaim shard bytes left behind by an interrupted write.",
+    )
+    p_cmp.add_argument("--dry-run", action="store_true", help="Report the reclaimable bytes only.")
+    p_cmp.set_defaults(func=cmd_cache_compact)
 
     p_mrg = csub.add_parser("merge", help="Fold another store (e.g. from a second machine) into this one.")
     p_mrg.add_argument("other", help="Path to the other store's root directory.")

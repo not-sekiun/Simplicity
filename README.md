@@ -278,6 +278,9 @@ real detector having survived exactly one transform:
 **Everything is deterministic.** Because the backbone is frozen, each image is
 decoded once and every view it needs is generated, embedded and cached — so an
 image contributes a fixed set of rows, not a fresh random draw per epoch. The
+views that *are* random by construction (`color_jitter`, the noise views, two of
+the chains) are seeded on the image's **content hash**, so the same photo gets
+the same degradation in every subsample, on every machine, at any path. The
 head trains on 11 fixed views: `clean` + 6 single severities + 4 training-only
 chains (`trainchain_a..d`) that are **disjoint from the 3 scored chains**, so
 training on composition never contaminates the columns that measure it.
@@ -432,15 +435,21 @@ src/aigc_detect/
   data/
     transforms.py                Robustness transform pipeline (5.2 table + chains)
     dataset.py                   ManifestImageDataset: CSV manifest -> (tensor, label)
+  cache/                       Content-addressed embedding store
+    hashing.py                   Image id = blake2b of the file's bytes (memoised)
+    store.py                     Sharded float16 vectors + WAL SQLite index
+    identity.py                  Backbone id without loading the checkpoint
+    migrate.py verify.py export.py
   embed/
     embeddings.py                Cache pooled embeddings per manifest
-    views.py                     Cache one embedding per robustness view
+    views.py                     Embed every robustness view; the .npz files are
+                                   a projection of the store
   train/probe.py               Paper training recipe on cached embeddings
   evaluation/
     grid.py                      Robustness evaluation summary (5.5.4)
     error_analysis.py            False positive/negative + per-generator report (5.5.5)
   inference/predict.py         Inference logic shared by predict.py and `aigc predict`
-tests/                         CLI surface + config contract (`uv run pytest`)
+tests/                         Cache invariants + CLI/config contract (`uv run pytest`)
 scripts/
   download_*.py                  Dataset downloaders/indexers, one per corpus
   make_*.py                      Manifest builders for each tier
@@ -454,6 +463,7 @@ scripts/
 data/                          gitignored — run `aigc check-env` before assuming.
                                  Relocatable via $AIGC_DATA_ROOT.
   raw/ processed/ heldout/ demo_val/ ood/ embeddings/
+  cache/                         The content-addressed store ($AIGC_CACHE_ROOT)
   aigc_ext/ real_ext/            Modern generators and real-domain corpora
   quarantine/                    Rejected corpora + the evidence (never train on these)
 models/                        Head checkpoints (a few KB each; backbone weights are

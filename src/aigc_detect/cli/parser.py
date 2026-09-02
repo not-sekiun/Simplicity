@@ -128,6 +128,7 @@ from aigc_detect.cli import (
     preview,
     train,
 )
+from aigc_detect.log import configure
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -158,6 +159,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main():
+    configure()
     parser = build_parser()
     args = parser.parse_args()
     args.func(args)

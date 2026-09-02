@@ -87,6 +87,11 @@ class Settings:
     server_host: str
     server_port: int
 
+    # "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL", or None to default to
+    # INFO. Read by aigc_detect.log.configure(); an unrecognised value falls
+    # back to INFO with a warning rather than raising.
+    log_level: str | None
+
     @property
     def has_kaggle_credentials(self) -> bool:
         return bool(self.kaggle_username and self.kaggle_key)
@@ -105,6 +110,7 @@ def get_settings() -> Settings:
         model_bundle=(Path(_env("AIGC_MODEL_BUNDLE")) if _env("AIGC_MODEL_BUNDLE") else None),
         server_host=_env("AIGC_SERVER_HOST") or "127.0.0.1",
         server_port=int(_env("AIGC_SERVER_PORT") or 8765),
+        log_level=_env("AIGC_LOG_LEVEL"),
     )
 
 
