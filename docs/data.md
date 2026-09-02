@@ -1,8 +1,9 @@
 # Dataset table
 
 Every corpus touched by the project, its category, and whether it was trained on,
-held out, or rejected. Shipping head:
-`pe-core-l__linear__aigcmodern_nosd3_e1.pt` @ threshold 0.985.
+held out, or rejected. Shipping head: `pe-core-l__linear__allsev_e1.pt` @
+threshold 0.980 â€” `aigcmodern_nosd3_e1.pt` @ 0.985 was the head when this table
+was first written and is now a superseded arm under `models/`.
 
 ## Master table
 
@@ -52,5 +53,6 @@ holdouts, and **`dalle3_holdout` is the only clean unseen-generator evidence** â
 which is exactly why it was held out. Prefer "four truly unseen generators in
 `ood`, plus a fully held-out modern generator" over the old "10 unseen" phrasing.
 
-Source: `src/aigc_detect/config/paths.py`, the manifests under `data/processed/`, and
+Source: `src/aigc_detect/registry/corpora.yaml` (the corpus registry), the
+recipes under `data/manifests/` and their resolved CSVs, and
 `data/quarantine/README.md`.

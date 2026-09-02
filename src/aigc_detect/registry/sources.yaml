@@ -179,7 +179,7 @@ sources:
       No API and no bulk-download endpoint -- fetch the WildRF release
       described in arXiv:2406.09398 by hand and lay it out under
       data/corpora/wildrf/images/ exactly as the paper's own train/val/test
-      split (see `expected_layout` below), then run `aigc pull wildrf` to
+      split (see `expected_layout` below), then run `aigc pull run wildrf` to
       verify and index it. Filenames are not meaningful; only the directory
       each image sits under is.
     expected_layout:
@@ -270,7 +270,7 @@ sources:
     # module docstring): the official S3 bucket
     # (http://images.cocodataset.org/zips/val2017.zip) was observed throttled
     # to ~12kB/s (18+ hr ETA) on this network versus Kaggle's ~20MB/s: run
-    # `aigc pull coco_val2017 --force` again later, or fetch the zip by hand
+    # `aigc pull run coco_val2017 --force` again later, or fetch the zip by hand
     # and use the `manual` path, if the Kaggle mirror is ever pulled.
     license: "cc-by-4.0 (COCO annotations); images per Flickr terms"
 
@@ -286,7 +286,7 @@ sources:
       "DALL-E Advanced" generator subset, and extract its images into
       data/corpora/wildfake_dalle_advanced/images/ (any layout -- every image
       file found anywhere under it is indexed). Then run
-      `aigc pull wildfake-dalle-advanced` to verify and index them.
+      `aigc pull run wildfake_dalle_advanced` to verify and index them.
     expected_layout:
       kind: flat_recursive
       exts: [.jpg, .jpeg, .png, .webp]

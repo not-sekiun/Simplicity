@@ -17,7 +17,9 @@ linear probe** — the backbone is never fine-tuned.
 
 On real social-media photographs at the shipping threshold: **FPR 2.15% at TPR
 97.97%**, measured on a held-out split of WildRF. The threshold is derived, not
-chosen — `scripts/derive_threshold.py` holds the protocol as code.
+chosen — `src/aigc_detect/train/calibrate.py` holds the protocol as code, runs
+as the last step of every training run, and writes the result into the model
+bundle, so a head and its operating point travel together.
 
 ## Status
 
@@ -25,9 +27,9 @@ Feature-complete. Every §5.5 deliverable is implemented and reported.
 
 | Piece | State |
 |---|---|
-| Data pipeline (download, index, split, 6 held-out eval tiers) | done |
+| Data pipeline (declared sources, resumable pulls, manifest recipes, 6 held-out eval tiers) | done |
 | Robustness transform pipeline (brief's exact 5.2 table + 3 realistic chains) | done |
-| Shortcut audit (blind-probe canary over every corpus directory) | done — caught **three** mislabelled corpora, see [docs/findings.md](docs/findings.md) |
+| Shortcut audit (blind-probe canary over every corpus) | done — and a **gate**: a corpus that clears it cannot enter a training manifest. Caught **three** mislabelled corpora, see [docs/findings.md](docs/findings.md) |
 | Frozen-backbone + linear-probe model pipeline | done |
 | Backbone race (`pe-core-l` vs `dinov3-l` vs `metaclip2-h`) | done — **`pe-core-l` wins** |
 | Inference script, `{image_path, pred}` JSON (deliverable 5.5.2) | done — `predict.py` |
@@ -112,8 +114,12 @@ Checks, if you are changing anything:
 
 ```bash
 uv run ruff check .   # lint; currently clean
-uv run pytest         # CLI surface + config contract; currently 70 green
+uv run pytest         # currently 220 green
 ```
+
+Both run in CI on every push (`.github/workflows/ci.yml`). A fresh clone has
+none of the ~24 GB of images and no trained checkpoint, so the tests that need
+either skip themselves by name rather than failing — see `tests/conftest.py`.
 
 ## Quick start: run inference on your own images
 
@@ -140,7 +146,9 @@ POSIX-relative path:
 Recurses subdirectories; accepts jpg/jpeg/png/webp/bmp; unreadable files are
 skipped with a warning rather than crashing the run. No `--head` needed — it
 defaults to the shipping checkpoint. The run also prints how many images cleared
-the decision threshold (0.980), which is the number a deployment would act on.
+the decision threshold, which is the number a deployment would act on; that
+threshold comes from the checkpoint's own bundle (0.980 for the shipping head),
+not from a constant in this repo.
 
 ## Model: frozen backbone + linear probe
 
@@ -226,15 +234,17 @@ is removed from the CLI so it cannot be pulled again. See
 [docs/findings.md](docs/findings.md) §2k.
 
 ```bash
-uv run main.py download tiny-genimage --limit-per-split 40000
-uv run main.py split --val-fraction 0.15 --seed 42
-uv run main.py audit-data --transform     # shortcut audit over EVERY corpus dir
+uv run main.py pull run tiny_genimage     # resumable; ends with the shortcut audit
+uv run main.py manifest resolve train      # the recipe -> data/manifests/resolved/train.csv
+uv run main.py audit-data --transform      # the same audit over EVERY declared corpus
 ```
 
 ### Evaluation tiers
 
-Six tiers, **none of them ever globbed by `split`** — so "don't train on the
-eval set" is structural, not a convention that can be forgotten:
+Six tiers, every one flagged `never_train` in its recipe — so "don't train on
+the eval set" is enforced rather than remembered. An eval-role corpus raises if
+a training recipe includes it, and a trainer handed a flagged manifest raises
+too (`aigc_detect.data.corpus.assert_trainable`):
 
 | Tier | n | What it is | Discriminates? |
 |---|---|---|---|
@@ -351,8 +361,10 @@ This is a *calibration* gap, not a representation one — the ranking stays inta
 someone their own photograph is fake costs far more than missing one AI image.
 The threshold is derived on a **held-out** WildRF split (split by image, swept in
 0.005 steps, F1-optimal on one half, reported on the other): **FPR .0215 / TPR
-.9797**. That protocol is `scripts/derive_threshold.py`, and its `--verify` mode
-asserts it still reproduces the table it was first recorded from.
+.9797**. That protocol is `src/aigc_detect/train/calibrate.py`; it runs at the
+end of every `aigc experiment run`, and `verify_recorded_table` asserts it still
+reproduces the table it was first recorded from — checked by `uv run pytest`,
+not by a flag someone has to remember to pass.
 
 **False negatives — and the most interesting result in the project.**
 Per-generator recall at the shipping threshold, weakest first:
@@ -420,23 +432,36 @@ condition a re-uploaded, re-compressed image actually meets.
 main.py                        Shim -> aigc_detect.cli (`uv run main.py --help`)
 predict.py                     Standalone inference entry point (deliverable 5.5.2)
 .env.example                   Documented environment variables; copy to .env
+experiments/<name>.yaml        A declared training run: manifest, backbone, views,
+                                 feature pipeline, head, schedule. `aigc experiment
+                                 run <name>` is what reproduces a checkpoint.
 src/aigc_detect/
   cli/                         One module per command group. Each command's handler
                                  and its argparse registration live together, so
                                  adding a command is one file plus one line.
   config/
-    settings.py                  .env + os.environ — the only reader of either
+    settings.py                  .env + os.environ - the only reader of either
     paths.py                     Directories and manifests, rooted at $AIGC_DATA_ROOT
     labels.py                    Label ids, split fraction, fallback norm stats
     generators.py                Generator -> architecture family tables
   registry/
     backbones.py                 Frozen VFM registry + loader (asserts <2B params)
     heads.py                     LinearHead / MLPHead
+    corpora.yaml                 Every corpus, declared with its role
+    sources.yaml                 How each corpus is (re)pulled - fetcher, repo, split,
+                                   cap, re-encode and quality gate, in YAML not Python
   data/
     transforms.py                Robustness transform pipeline (5.2 table + chains)
     dataset.py                   ManifestImageDataset + resolve_image_path
     corpus.py                    The corpus registry (declared, not globbed)
     manifest.py                  Recipes: include / filter / assign / split
+    sources.py                   Reads sources.yaml into Source records
+    fetchers/                    One backend per kind (hf, kaggle, manual) behind one
+                                   `Fetcher` protocol. Resume is the default: every
+                                   batch commits, index before state file, always.
+    audit/                       The blind-probe shortcut audit and the gate it feeds.
+                                   A corpus that clears 0.70 balanced accuracy cannot
+                                   enter a training manifest without a written override.
     relocate.py                  The one-time move into data/corpora/
     prune.py                     Orphan sweep (reports, never deletes)
   cache/                       Content-addressed embedding store
@@ -448,27 +473,43 @@ src/aigc_detect/
     embeddings.py                Cache pooled embeddings per manifest
     views.py                     Embed every robustness view; the .npz files are
                                    a projection of the store
-  train/probe.py               Paper training recipe on cached embeddings
+  train/
+    features.py                  FeaturePipeline: gather / l2norm / standardize. The
+                                   ONE place that turns embeddings into head input.
+    probe.py                     Paper training recipe on cached embeddings
+    calibrate.py                 The decision-threshold protocol, run in-loop
+    experiment.py                Config in, run directory out (data/runs/<run_id>/)
   evaluation/
     grid.py                      Robustness evaluation summary (5.5.4)
     error_analysis.py            False positive/negative + per-generator report (5.5.5)
-  inference/predict.py         Inference logic shared by predict.py and `aigc predict`
-tests/                         Cache invariants + CLI/config contract (`uv run pytest`)
+  inference/
+    predict.py                   Inference logic shared by predict.py and `aigc predict`
+    bundle.py                    The model bundle: backbone (with revision), fitted
+                                   feature pipeline, head, threshold AND how it was
+                                   derived. Legacy checkpoints upgrade in memory.
+    detector.py                  The `Detector` protocol + FrozenProbeDetector, so a
+                                   caller holds "a model" and never a backbone registry
+apps/server/app.py             The demo's FastAPI server (`aigc-serve`). Not graded;
+                                 needs `--extra demo`.
+demo/extension/                One source tree under src/, built by build.js into
+                                 dist/chrome/ and dist/firefox/ from one manifest base
+tests/                         Cache invariants, CLI/config contract, manifests,
+                                 fetchers, features, calibration, bundles, experiment
+                                 configs, and predict-vs-server parity (`uv run pytest`)
+.github/workflows/ci.yml       ruff + the full suite, on every push
 scripts/
-  download_*.py                  Dataset downloaders/indexers, one per corpus
-  audit_data.py                  Shortcut audit + blind-probe canary (every corpus dir)
-  derive_threshold.py            The decision-threshold protocol, as code
-  train_instrumented.py          Instrumented replica of the shipping run -> stats/
-  export_eval_stats.py           Every evaluation number as tidy CSV -> stats/
-  plot_stats.py                  Renders the charts
+  audit_data.py                  Shortcut audit over the corpus registry (CLI entry)
+  audit_corpora.py               Per-corpus health + audit verdict report
+  plot_run.py                    Charts from one `aigc experiment run` run directory
   run_race.py                    Backbone race runner
-  worker.py                      Distributed embedding on a second machine
 data/                          Relocatable via $AIGC_DATA_ROOT. Images are
                                  gitignored; everything describing them is not.
   corpora/<id>/                  One corpus: images/ + index.csv + corpus.yaml
   manifests/<name>.yaml          The recipe; resolved/<name>.csv its rows
   cache/                         The content-addressed store ($AIGC_CACHE_ROOT)
   embeddings/                    .npz projections of the store (rebuildable)
+  runs/<run_id>/                 One experiment run: resolved config, eval grid,
+                                   threshold sweep, and the bundle it produced
   quarantine/                    A rejected corpus + the evidence (never train on it)
 models/                        Head checkpoints (a few KB each; backbone weights are
                                  downloaded, never saved here). archive/ holds
@@ -485,9 +526,13 @@ reports/                       Robustness grids, race results, error analysis, a
   so `import aigc_detect` works without any path manipulation. Optional
   extras: `--extra demo` (FastAPI demo server), `--extra viz` (matplotlib).
 - `ruff` for linting and `pytest` for the contract tests, in the `dev`
-  dependency group. Both are clean and green on `main`; the test suite pins
-  the CLI surface and the config package's public names, which is what makes
-  restructuring the codebase safe rather than hopeful.
+  dependency group, run in GitHub Actions on every push
+  (`.github/workflows/ci.yml`). The suite pins the CLI surface, the config
+  package's public names, every manifest recipe's resolved rows, the cache
+  store's invariants, and that `predict.py` and the demo server agree to
+  1e-4 — which is what makes restructuring the codebase safe rather than
+  hopeful. Tests that need image bytes or a trained checkpoint skip by name
+  on a bare clone instead of failing.
 - `python-dotenv` for `.env` loading — see [Setup](#setup).
 - PyTorch 2.13.0+cu130 + torchvision, scikit-learn (AUC/balanced
   accuracy), pandas/numpy, Hugging Face `datasets`/`transformers`/`timm`

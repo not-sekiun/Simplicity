@@ -1,17 +1,35 @@
 # stats/ — presentation data and charts
 
-Every number on a slide should be traceable to a file here, and every file here
-is regenerable from cached embeddings in under two minutes. Nothing in this
+Every number on a slide should be traceable to a file here. Nothing in this
 folder is used for training or model selection.
 
-## Regenerate everything
+## Regenerating
+
+The three scripts that used to write this directory (`train_instrumented.py`,
+`export_eval_stats.py`, `plot_stats.py`) were retired in tier 7: a training run
+is now `aigc experiment run`, and every run writes its own record to
+`data/runs/<run_id>/` — the resolved config, `eval_grid.csv`,
+`threshold_sweep.csv`, and (with `--log-dir`) `train_loss_steps.csv` and
+`val_curve.csv` in the same shape those scripts produced.
 
 ```
 uv sync --extra viz
-uv run python scripts/train_instrumented.py    # training curves  (~3 min, GPU)
-uv run python scripts/export_eval_stats.py     # evaluation tables (~40 s, CPU)
-uv run python scripts/plot_stats.py            # charts -> stats/charts/
+uv run aigc experiment run allsev_e1 --log-dir data/runs/logs
+uv run python scripts/plot_run.py data/runs/<run_id> --log-dir data/runs/logs
 ```
+
+That regenerates the four **single-run** charts: `01_training_loss.png`,
+`02_validation_auc.png`, `03_per_view_auc.png`, `04_threshold_sweep.png`.
+
+**Charts 05-07 have no one-command path any more, and this is worth stating
+plainly rather than leaving to be discovered.** Per-generator recall, the
+ablation-arm comparison and the four-tier robustness summary are all
+inherently CROSS-run or CROSS-tier: they compare several checkpoints, or the
+same head against four evaluation tiers side by side, where a run directory is
+deliberately one run's record. The CSVs below remain the committed evidence
+for the numbers this project reports; rebuilding them means running `eval-grid`
+(and `error-analysis --by-generator`) per tier and assembling the results, which
+nothing here does for you today.
 
 ## The CSVs
 
@@ -64,11 +82,11 @@ the deployed head remains `models/pe-core-l__linear__allsev_e1.pt`.
 
 ## The threshold
 
-`0.980`, and it is derived rather than chosen. `scripts/derive_threshold.py`
-holds the protocol as code with the split pinned, and `--verify` asserts it
-still reproduces FINDINGS 2j's recorded table. Re-run it on every head swap:
-
-```
-uv run python scripts/derive_threshold.py --head models/pe-core-l__linear__allsev_e1.pt
-uv run python scripts/derive_threshold.py --verify
-```
+`0.980`, and it is derived rather than chosen. `src/aigc_detect/train/calibrate.py`
+holds the protocol as code with the split pinned, and there is nothing to re-run
+on a head swap: it is the last step of every `aigc experiment run`, and the
+threshold it derives is written into the model bundle rather than into a
+constant somewhere. `verify_recorded_table` asserts the protocol still
+reproduces FINDINGS 2j's recorded table, and `uv run pytest` is what checks
+that (`tests/test_bundle.py`), instead of a `--verify` flag someone has to
+remember to pass.

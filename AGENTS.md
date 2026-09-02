@@ -32,9 +32,11 @@ rather than success.
   script; `uv run main.py <command>` is a 13-line shim kept because every
   document and every muscle memory uses that form. They dispatch to the
   same `aigc_detect.cli`.
-- **Dev tooling:** `uv run ruff check .` and `uv run pytest`. Both are
-  currently clean and green — keep them that way; the test suite is what
-  makes restructuring safe.
+- **Dev tooling:** `uv run ruff check .` and `uv run pytest` (220 green).
+  Both run in GitHub Actions on every push (`.github/workflows/ci.yml`).
+  Keep them green — the suite is what makes restructuring safe. Tests that
+  need image bytes or a checkpoint skip by name on a bare clone rather than
+  failing; see `tests/conftest.py`.
 - **Configuration:** copy `.env.example` to `.env`. Nothing outside
   `aigc_detect.config.settings` reads `os.environ`. `AIGC_DATA_ROOT`
   relocates the ~24 GB image tree off the system drive.
@@ -59,6 +61,10 @@ src/aigc_detect/
     labels.py                    0=real, 1=aigc; split seed; fallback norm stats.
     generators.py                generator -> architecture family; TRAIN_GENERATORS.
   registry/
+    sources.yaml                 How every corpus is (re)pulled: fetcher, repo,
+                                   split, cap, re-encode, quality gate. Adding a
+                                   HuggingFace source is eight lines here and no
+                                   Python — there is a test that says so.
     backbones.py                 Frozen VFM registry. load_backbone(key) ->
                                    (module, pooled_dim, native_res). Asserts
                                    <2e9 params. Ship the VISION TOWER only.
@@ -78,6 +84,17 @@ src/aigc_detect/
                                    make_*.py scripts.
     prune.py                     The orphan sweep. Reports, never deletes —
                                    "unreferenced" is evidence, not a verdict.
+    sources.py                   Reads sources.yaml into Source records.
+    fetchers/                    One backend per kind (hf, kaggle, manual) behind
+                                   one Fetcher protocol. RESUME IS THE DEFAULT:
+                                   bytes land, then index.csv is appended and
+                                   fsync'd, then .pull_state.json. Never the other
+                                   order — read base.py's docstring before editing.
+    audit/                       The blind-probe shortcut audit and the GATE it
+                                   feeds. A corpus clearing 0.70 balanced accuracy
+                                   cannot enter a training manifest without an
+                                   override with a written reason. Enforced in
+                                   corpus.assert_trainable, not a second place.
   cache/                       The content-addressed embedding store (tier 4).
     hashing.py                   blake2b-128 of a file's bytes = its image id,
                                    memoised as (path, mtime, size) -> id.
@@ -98,20 +115,50 @@ src/aigc_detect/
                                    files are a manifest-ordered PROJECTION of it,
                                    rebuildable with no GPU. Read its docstring
                                    before touching seeding or cache keys.
-  train/probe.py               Paper recipe on cached embeddings
+  train/
+    features.py                  FeaturePipeline (gather / l2norm / standardize).
+                                   The ONE place embeddings become head input; both
+                                   trainers delegate to it. fit() takes one array,
+                                   so there is no overload that leaks val stats.
+    probe.py                     Paper recipe on cached embeddings
+    calibrate.py                 The threshold protocol, run in-loop. The split is
+                                   PINNED (RandomState(0), first half = A); it is
+                                   what reproduces findings 2j's recorded table.
+    experiment.py                YAML in, data/runs/<run_id>/ out. config_hash is
+                                   over the RESOLVED config, so a preset that
+                                   expands differently changes the hash.
   evaluation/
     grid.py                      Per-view AUC/BAcc at one fixed threshold,
                                    AUC_robust, robustness gap. Deliverable 5.5.4.
     error_analysis.py            Deliverable 5.5.5.
-  inference/predict.py         {image_path, pred} JSON. Owns DECISION_THRESHOLD.
-scripts/                       Ad-hoc corpus pulls and one-off drivers. Being
-                                 replaced tier by tier (see below), NOT deleted
-                                 ahead of their replacements. The seven
-                                 make_*.py manifest builders WERE deleted in
-                                 tier 5, once recipes replaced them.
-tests/                         Cache-store invariants, CLI contract, config
-                                 surface. Written against the invocation, not
-                                 import paths, so they survive code moving.
+  inference/
+    predict.py                   {image_path, pred} JSON. Loads a Bundle; owns no
+                                   threshold constant.
+    bundle.py                    The versioned model artifact: backbone WITH its
+                                   revision, the fitted feature pipeline, the head,
+                                   and the threshold plus how it was derived. A
+                                   legacy checkpoint upgrades in memory so the 25
+                                   archived heads docs/findings.md cites still load.
+    detector.py                  The Detector protocol + FrozenProbeDetector, so a
+                                   caller holds "a model" and never a registry.
+apps/server/app.py             The demo's FastAPI server (`aigc-serve`). Not a
+                                 graded deliverable; needs `--extra demo`.
+experiments/<name>.yaml        A declared training run. `aigc experiment run` is
+                                 what reproduces a checkpoint.
+scripts/                       What is LEFT after tiers 5-7 replaced the rest:
+                                 audit_data.py / audit_corpora.py (audit entry
+                                 points), plot_run.py (charts from one run dir),
+                                 run_race.py (the backbone-race driver). Each is
+                                 import-tested — tests/test_scripts.py — because
+                                 scripts/ is invisible to every other test and
+                                 rots silently.
+tests/                         Cache invariants, CLI contract, config surface,
+                                 manifest recipes, fetcher resume, features,
+                                 calibration, bundles, experiment configs, and
+                                 predict-vs-server parity. Written against the
+                                 invocation, not import paths, so they survive
+                                 code moving.
+.github/workflows/ci.yml       ruff + the full suite, on every push.
 docs/                          findings, experiments, data, transforms, archive/
 data/                          $AIGC_DATA_ROOT-relocatable. Five directories,
                                  each meaning exactly one thing:
@@ -122,6 +169,8 @@ data/                          $AIGC_DATA_ROOT-relocatable. Five directories,
                                    currently selects. Both committed.
   cache/                         the content-addressed embedding store
   embeddings/                    .npz projections of it (rebuildable, ignored)
+  runs/<run_id>/                 one experiment run: resolved config, eval grid,
+                                   threshold sweep, and the bundle it produced
   quarantine/                    a rejected corpus, reduced to evidence
 ```
 
@@ -133,10 +182,12 @@ on `refactor/v2` and is turning this into an extensible testbed.
 **Shipping model:** `models/pe-core-l__linear__allsev_e1.pt` — a linear probe
 on frozen `pe-core-l`, pinned to hub revision `e63206c8`, at decision
 threshold **0.980**. That threshold is calibrated to *this* checkpoint and
-currently lives as a module constant in `inference/predict.py`; re-derive it
-on every head swap with `scripts/derive_threshold.py`. Superseded ablation
-arms are in `models/archive/` — moved, not deleted, because
-`docs/findings.md` cites their numbers.
+travels INSIDE it: `inference/bundle.py` carries `threshold` and
+`threshold_source`, and `train/calibrate.py` re-derives it as the last step of
+every `aigc experiment run`. There is no threshold constant to forget to
+update. Superseded ablation arms are in `models/archive/` — moved, not
+deleted, because `docs/findings.md` cites their numbers, and `load_bundle`
+upgrades their old dict shape in memory so they still load.
 
 **Backbone race: decided.** `pe-core-l` beat `metaclip2-h` and `dinov3-l` on
 the OOD tier (the only tier with room left to discriminate). Results are
@@ -152,9 +203,11 @@ ten unseen), `wildrf_test` (real social-media re-encoding), and
 robustness grid, error analysis, the deliverable inference script, and the
 demo server + Chrome extension.
 
-**Refactor progress:** Tiers 0–5 are done — safety net, docs consolidation,
-a 35 GB disk scrub, the package restructure, the config package, the
-content-addressed cache, and the data hierarchy.
+**Refactor progress:** all nine tiers are done — safety net, docs
+consolidation, a 35 GB disk scrub, the package restructure, the config
+package, the content-addressed cache, the data hierarchy, resumable fetchers
+and the audit gate, experiment configs and the model bundle, the demo as a
+first-class app, and CI.
 
 **Tier 5, what changed.** `data/` went from eleven top-level directories that
 mixed provenance with evaluation tier to five that each mean one thing. Every
@@ -189,7 +242,8 @@ the store and treats `data/embeddings/*.npz` as a projection of it, so:
 - re-encoding one image costs one forward pass, not one whole file;
 - moving the repo, or rebuilding an .npz, costs a gather and no GPU;
 - two machines merge with `aigc cache merge` — `scripts/worker.py`'s
-  "THE REPO PATH MUST MATCH" rule is gone, not merely documented.
+  "THE REPO PATH MUST MATCH" rule is gone, not merely documented (the script
+  itself was retired in tier 7, once nothing was left for it to do).
 
 The migration imported 695,321 vectors (1.4 GB) of existing GPU work.
 `aigc cache verify` re-embeds a sample and confirms it, and an .npz rebuilt from
@@ -208,28 +262,53 @@ draw of the same test rather than a different test. The training views
 (`train`, `train_ext`, ~550k rows) have NOT been recomputed and will report
 STALE until someone runs `aigc embed-views --manifest train --train-chains`.
 
-The remaining tiers, in order:
+**Tiers 6-9, what changed.**
 
-- **6 — a source registry and resumable fetchers**, replacing the six ad-hoc
-  `download_*.py` scripts, with the blind-probe audit as a gate on every pull.
-- **7 — experiment configs and a model bundle** carrying its own threshold;
-  this is where backbone and head become genuinely swappable.
-- **8 — demo as first class:** a `Detector` protocol and a cross-browser
-  extension build.
-- **9 — CI.**
-
-**Known issue, unfixed:** `data/demo_val/demo_val.csv` references 5,000 COCO
-images by absolute path inside `~/.cache/kagglehub`. A committed manifest
-depends on a transient cache directory; tier 5 ingests those images.
+- **Pulls are declared and resumable.** Eleven sources live in
+  `registry/sources.yaml`; `aigc pull run <id>` is the interface, four fetcher
+  backends answer one protocol, and resume is the default rather than a flag.
+  A changed `Source` config refuses to resume (`--force` is the opt-in) instead
+  of interleaving two pull configurations under one corpus id. The six
+  `download_*.py` scripts are gone; `download` / `download-demo` /
+  `download-ood` are thin bridges so documented invocations still work.
+  `download sid-set` deliberately no longer accepts `--split` or
+  `--include-tampered`: the registered source is reals-only by construction.
+- **The shortcut audit is a gate, not a report.** Every pull ends with the
+  blind probe and writes its verdict into the corpus's own `corpus.yaml`;
+  `assert_trainable` — already the one answer to "may this corpus train" —
+  now fires for a cleared probe too. This is the check that would have caught
+  the SD3 and depth-map-pexels incidents.
+- **A run is declared, and the threshold ships inside the model.**
+  `aigc experiment run <name>` reads `experiments/<name>.yaml` and writes
+  `data/runs/<run_id>/` with the resolved config, eval grid, derived threshold
+  and a bundle. Reproducing a head used to be a seven-flag command plus a
+  separate `derive_threshold.py` run plus copying the number into a constant —
+  findings 2j/2k record that step being forgotten and reconstructed twice,
+  disagreeing with itself both times.
+- **One implementation of the scaler.** `FeaturePipeline` replaced three
+  hand-rolled copies of `(x - mean) / std` (in `train.probe`, in
+  `inference.predict`, and in the demo server's own `Model` class). The
+  server now holds a `Detector`; `tests/test_parity.py` holds it and
+  `predict.py` to 1e-4 instead of a docstring asking the reader to trust it.
+- **The extension is one source tree, two browsers.** `demo/extension/src/`
+  builds to `dist/chrome/` and `dist/firefox/` from one manifest base. It no
+  longer ships its own threshold default of 0.5 (18.75% FPR against 2.15%) —
+  it reads the calibrated one from the server's `/health`.
+- **CI runs everything on a machine that has never seen this data.** A fresh
+  clone has the committed manifests and none of the images; `needs_images`
+  makes that a clean skip instead of a failure that reads like a broken
+  manifest.
 
 ## Key decisions / constraints
 
-- **Never train on `data/demo_val/`.** The brief (5.4) explicitly says not
-  to; it doesn't count toward scoring. It lives in a directory
-  `make_splits.py` structurally never looks at, so this can't happen by
-  accident. Use it only for periodic checkpoint eval, not hyperparameter
-  tuning — it's the only external benchmark available, so tuning against
-  it would just be overfitting to it under another name.
+- **Never train on `demo_val`.** The brief (5.4) explicitly says not to; it
+  doesn't count toward scoring. This used to rest on a structural accident
+  (`make_splits.py` globbed one directory); it is now a declared rule with
+  three enforcement points — the recipe is flagged `never_train`, an
+  eval-role corpus raises if a training recipe includes it, and a trainer
+  handed a flagged manifest raises. Use it only for periodic checkpoint eval,
+  not hyperparameter tuning — it's the only external benchmark available, so
+  tuning against it would just be overfitting to it under another name.
 - Training/iteration always uses the internal 85/15 `train.csv`/`val.csv`.
 - **Architecture: frozen VFM + probe head**, per *Simplicity Prevails*
   (arXiv:2602.01738) — a single linear layer on the pooled output of a
@@ -251,10 +330,10 @@ depends on a transient cache directory; tier 5 ingests those images.
 - The augmentation parameter table (JPEG q90/70/50/30, blur σ0.5/1/2, resize
   0.5x/0.25x, noise σ0.02/0.05/0.10, color jitter ±20%, center crop 80%) is
   fixed by the brief — see `transforms.py`'s module docstring.
-- COCO val2017: `download_demo_val.py` prefers a Kaggle mirror
-  (`xthink/coco-2017-val-images`) — the official S3 bucket was observed
-  throttled to ~12kB/s (18+ hr ETA) on this network; Kaggle was ~20MB/s.
-  Falls back to S3 automatically if Kaggle isn't configured.
+- COCO val2017: the `coco_val2017` source in `registry/sources.yaml` pulls a
+  Kaggle mirror (`xthink/coco-2017-val-images`) — the official S3 bucket was
+  observed throttled to ~12kB/s (18+ hr ETA) on this network; Kaggle was
+  ~20MB/s. The S3 fallback is documented in that entry, not automated.
 - ModelScope (for WildFake) is unreachable at the API/SDK level from this
   network — confirmed via both `curl` and the `modelscope` Python SDK
   hanging indefinitely, even though the plain website loads. Manual
@@ -266,8 +345,12 @@ depends on a transient cache directory; tier 5 ingests those images.
 - Windows dev machine, PowerShell/Git-Bash — avoid Unicode em-dashes (and
   similar) in anything passed to `print()`; they mojibake in the console.
   Fine in docstrings/comments, just not stdout.
-- CSV manifests always use columns `image_path,label,source`; label is
-  `0`=real, `1`=AIGC (`aigc_detect.config.LABEL_REAL`/`LABEL_AIGC`).
+- Corpus indexes and resolved manifests use columns
+  `image_path,label,source,generator` (`aigc_detect.data.corpus.COLUMNS`);
+  label is `0`=real, `1`=AIGC (`aigc_detect.config.LABEL_REAL`/`LABEL_AIGC`).
+  Every `image_path` is relative to `$AIGC_DATA_ROOT` with POSIX separators —
+  a test asserts it, because a manifest that resolves against the wrong root
+  empties silently rather than raising.
 
 ## Working conventions
 
