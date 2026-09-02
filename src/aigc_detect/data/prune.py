@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from aigc_detect.data.corpus import Corpus, all_corpora
+from aigc_detect.data.dataset import resolve_image_path
 from aigc_detect.data.manifest import list_recipes, resolve
 from aigc_detect.log import get_logger
 
@@ -67,13 +68,16 @@ def referenced_paths(manifests: Iterable[str] | None = None) -> set[str]:
 
 
 def _normalize(path: str | Path) -> str:
-    """Case-folded resolved path.
+    """One absolute, case-folded key for a file, whatever form it arrives in.
 
-    Windows paths differ in case between a manifest written by one script and a
-    directory walk done by another; treating those as different files would
-    report every image in the project as an orphan.
+    Two normalizations in one, and both are load-bearing. A manifest row may be
+    relative to the data root while a directory walk yields absolutes, so the
+    row goes through `resolve_image_path` -- resolving it against the working
+    directory instead would report every image in the project as an orphan.
+    And Windows paths differ in case between a manifest written by one script
+    and a walk done by another, which would do the same.
     """
-    return str(Path(str(path)).resolve()).casefold()
+    return str(resolve_image_path(path).resolve()).casefold()
 
 
 def sweep(manifests: Iterable[str] | None = None) -> list[CorpusUsage]:

@@ -21,6 +21,25 @@ DATA_DIR = _settings.data_root
 RAW_DIR = DATA_DIR / "raw"
 PROCESSED_DIR = DATA_DIR / "processed"
 
+# Since Tier 5 a corpus is a directory under CORPORA_DIR holding images/,
+# index.csv and corpus.yaml, and a manifest is a recipe under MANIFESTS_DIR
+# resolved into MANIFESTS_RESOLVED_DIR. RAW_DIR and PROCESSED_DIR survive only
+# for the download scripts that still write into them; Tier 6 retires both.
+CORPORA_DIR = DATA_DIR / "corpora"
+MANIFESTS_DIR = DATA_DIR / "manifests"
+MANIFESTS_RESOLVED_DIR = MANIFESTS_DIR / "resolved"
+
+
+def _manifest(name: str):
+    """Where a resolved manifest lives.
+
+    Every constant below used to name a hand-built CSV in whichever directory
+    the script that wrote it happened to use -- five directories for ten files.
+    They are all one recipe away now, and the constants survive so no importer
+    had to change.
+    """
+    return MANIFESTS_RESOLVED_DIR / f"{name}.csv"
+
 # Cached frozen-backbone pooled embeddings, one .npz per (backbone, manifest,
 # view). NOTE: deliberately still under DATA_DIR rather than the configurable
 # cache_root -- 274 caches are keyed to this location and the content-addressed
@@ -30,15 +49,15 @@ EMBEDDINGS_DIR = DATA_DIR / "embeddings"
 
 # --- Training pool -----------------------------------------------------------
 
-TRAIN_MANIFEST = PROCESSED_DIR / "train.csv"
-VAL_MANIFEST = PROCESSED_DIR / "val.csv"
+TRAIN_MANIFEST = _manifest("train")
+VAL_MANIFEST = _manifest("val")
 
 # Union of train.csv and the data/train_ext/ generator-diverse slice. A SEPARATE
 # manifest on purpose: adding those images to data/raw/ and re-running `split`
 # would rewrite train.csv/val.csv in place, silently invalidating every cache
 # keyed on their fingerprints. A new name means a new cache stem, so nothing
 # already computed goes stale.
-TRAIN_EXT_MANIFEST = PROCESSED_DIR / "train_ext.csv"
+TRAIN_EXT_MANIFEST = _manifest("train_ext")
 
 # REAL-only corpora, concatenated onto training via --extra-train-manifest.
 # Each keeps its own manifest, and therefore its own cache stem, so adding one
@@ -48,19 +67,22 @@ TRAIN_EXT_MANIFEST = PROCESSED_DIR / "train_ext.csv"
 # and any real image from an absent domain gets mapped confidently into AIGC
 # territory. Adding sid_real + unsplash_real took WildRF FPR@0.5 from .330 to
 # .183 with no cost on ood.
-SID_REAL_MANIFEST = PROCESSED_DIR / "sid_real.csv"            # SID_Set's real half (OpenImages)
-UNSPLASH_REAL_MANIFEST = PROCESSED_DIR / "unsplash_real.csv"  # curated photography
-PEXELS_REAL_MANIFEST = PROCESSED_DIR / "pexels_real.csv"      # curated photography
-PHOTO_REAL_MANIFEST = PROCESSED_DIR / "photo_real.csv"        # union of the two above
+SID_REAL_MANIFEST = _manifest("sid_real")            # SID_Set's real half (OpenImages)
+UNSPLASH_REAL_MANIFEST = _manifest("unsplash_real")  # curated photography
+# The pexels corpus was DELETED in Tier 5 -- fully orphaned, and this CSV was
+# never written in the first place. The constant survives only so
+# scripts/download_real_domains.py still imports; Tier 6 removes both.
+PEXELS_REAL_MANIFEST = _manifest("pexels_real")
+PHOTO_REAL_MANIFEST = _manifest("photo_real")        # union of the two above
 
 # MODERN AI generators (2024-2025), added because our AIGC half is entirely
 # GenImage-era 2022 and the remaining gap is diffusion, not GANs. Three separate
 # publishers on purpose: one dataset is one provenance, and a detector will learn
 # "this source" as readily as "this generator".
 AIGC_EXT_DIR = DATA_DIR / "aigc_ext"
-NANO_BANANA_MANIFEST = PROCESSED_DIR / "nano_banana.csv"      # Gemini 2.5 Flash Image
-MIDJOURNEY_V6_MANIFEST = PROCESSED_DIR / "midjourney_v6.csv"
-AIGC_MODERN_MANIFEST = PROCESSED_DIR / "aigc_modern.csv"      # union, EXCLUDES dalle3
+NANO_BANANA_MANIFEST = _manifest("nano_banana")      # Gemini 2.5 Flash Image
+MIDJOURNEY_V6_MANIFEST = _manifest("midjourney_v6")
+AIGC_MODERN_MANIFEST = _manifest("aigc_modern")      # union, EXCLUDES dalle3
 # SD3 -- REJECTED 2026-08-30, mislabelled real photos. Quarantined under
 # data/quarantine/. Read that README before ever re-adding this source.
 
@@ -71,7 +93,7 @@ AIGC_MODERN_MANIFEST = PROCESSED_DIR / "aigc_modern.csv"      # union, EXCLUDES 
 # wildrf_real is an in-domain reading. The arm trained without it is the honest
 # one.
 REAL_EXT_DIR = DATA_DIR / "real_ext"
-WILDRF_REAL_MANIFEST = PROCESSED_DIR / "wildrf_real.csv"
+WILDRF_REAL_MANIFEST = _manifest("wildrf_real")
 
 # --- Evaluation tiers: NEVER trained on --------------------------------------
 #
@@ -80,29 +102,29 @@ WILDRF_REAL_MANIFEST = PROCESSED_DIR / "wildrf_real.csv"
 # construction rather than by discipline.
 
 WILDRF_DIR = DATA_DIR / "wildrf"
-WILDRF_TEST_MANIFEST = WILDRF_DIR / "wildrf_test.csv"
+WILDRF_TEST_MANIFEST = _manifest("wildrf_test")
 
 # Held-out modern-diffusion tier. Pulled alongside nano_banana and
 # midjourney_v6 and deliberately kept back, so "does this generalise to a
 # modern generator we never saw" is a question we can actually answer.
-DALLE3_HOLDOUT_MANIFEST = PROCESSED_DIR / "dalle3_holdout.csv"
+DALLE3_HOLDOUT_MANIFEST = _manifest("dalle3_holdout")
 
 # In-distribution held-out set: Tiny-GenImage's own HF "validation" split.
 # NOT a cross-generator set -- it contains the same 7 generators as train.
 HELDOUT_DIR = DATA_DIR / "heldout"
-HELDOUT_MANIFEST = HELDOUT_DIR / "heldout.csv"
+HELDOUT_MANIFEST = _manifest("heldout")
 
 # The challenge brief's external, self-reported benchmark (5.4): COCO val2017
 # plus WildFake "DALL-E Advanced". The brief says explicitly not to train on it.
 DEMO_VAL_DIR = DATA_DIR / "demo_val"
-DEMO_VAL_MANIFEST = DEMO_VAL_DIR / "demo_val.csv"
+DEMO_VAL_MANIFEST = _manifest("demo_val")
 
 # The hard out-of-distribution tier, and the only one with room left to
 # discriminate: 18 generator classes, TEN absent from training, five of those
 # GAN families. Under the shipping head demo-val has 16 of 18 views at or above
 # 0.99; this tier has none.
 OOD_DIR = DATA_DIR / "ood"
-OOD_MANIFEST = OOD_DIR / "ood.csv"
+OOD_MANIFEST = _manifest("ood")
 
 # --- Rejected corpora ---------------------------------------------------------
 
@@ -113,6 +135,7 @@ QUARANTINE_DIR = DATA_DIR / "quarantine"
 __all__ = [
     "AIGC_EXT_DIR",
     "AIGC_MODERN_MANIFEST",
+    "CORPORA_DIR",
     "DALLE3_HOLDOUT_MANIFEST",
     "DATA_DIR",
     "DEMO_VAL_DIR",
@@ -120,6 +143,8 @@ __all__ = [
     "EMBEDDINGS_DIR",
     "HELDOUT_DIR",
     "HELDOUT_MANIFEST",
+    "MANIFESTS_DIR",
+    "MANIFESTS_RESOLVED_DIR",
     "MIDJOURNEY_V6_MANIFEST",
     "NANO_BANANA_MANIFEST",
     "OOD_DIR",

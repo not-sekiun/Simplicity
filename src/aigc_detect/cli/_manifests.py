@@ -10,7 +10,6 @@ from aigc_detect.config import (
     MIDJOURNEY_V6_MANIFEST,
     NANO_BANANA_MANIFEST,
     OOD_MANIFEST,
-    PEXELS_REAL_MANIFEST,
     PHOTO_REAL_MANIFEST,
     SID_REAL_MANIFEST,
     TRAIN_EXT_MANIFEST,
@@ -31,7 +30,6 @@ MANIFESTS = {
     "sid-real": SID_REAL_MANIFEST,
     "photo-real": PHOTO_REAL_MANIFEST,
     "unsplash-real": UNSPLASH_REAL_MANIFEST,
-    "pexels-real": PEXELS_REAL_MANIFEST,
     "wildrf-real": WILDRF_REAL_MANIFEST,
     "wildrf-test": WILDRF_TEST_MANIFEST,
     "nano-banana": NANO_BANANA_MANIFEST,
@@ -47,25 +45,21 @@ MANIFEST_CHOICES = list(MANIFESTS)
 
 
 def _resolve_manifest(name: str):
-    """Map a --manifest choice to its path, exiting with a hint if it's missing.
+    """Map a --manifest choice to its resolved CSV, exiting with a hint if absent.
 
     demo-val is embeddable for EVALUATION ONLY (brief 5.4 forbids training on
-    it). train_head never looks at it -- it hardcodes TRAIN_MANIFEST/VAL_MANIFEST.
+    it), which the manifest's own `never_train: true` now enforces rather than
+    leaving to convention.
+
+    The hint used to be a per-manifest table naming which of seven `make_*.py`
+    scripts to run. There is one answer now, because there is one way a manifest
+    comes into existence.
     """
-    manifests = MANIFESTS
-    manifest = manifests[name]
+    manifest = MANIFESTS[name]
     if not manifest.exists():
-        hint = {"demo-val": "build-demo-val", "heldout": "build-heldout",
-                "ood": "download-ood` then `main.py build-ood",
-                "train-ext": "python scripts/make_train_ext.py",
-                "sid-real": "python scripts/make_sid_real.py",
-                "photo-real": "python scripts/download_real_domains.py --merge",
-                "wildrf-real": "python scripts/make_wildrf.py",
-                "wildrf-test": "python scripts/make_wildrf.py",
-                "nano-banana": "python scripts/download_aigc_modern.py --source nano-banana",
-                "midjourney-v6": "python scripts/download_aigc_modern.py --source midjourney-v6",
-                "dalle3-holdout": "python scripts/download_aigc_modern.py --source dalle3-holdout",
-                "aigc-modern": "python scripts/download_aigc_modern.py --merge"}.get(name, "split")
-        print(f"No {name} manifest at {manifest}. Run `main.py {hint}` first.")
+        recipe = name.replace("-", "_")
+        print(f"No {name} manifest at {manifest}.")
+        print(f"Run: uv run aigc manifest resolve {recipe}")
+        print("     (`aigc manifest list` shows every recipe; `aigc corpus list` what backs them)")
         sys.exit(1)
     return manifest

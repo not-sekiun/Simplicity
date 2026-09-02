@@ -434,7 +434,11 @@ src/aigc_detect/
     heads.py                     LinearHead / MLPHead
   data/
     transforms.py                Robustness transform pipeline (5.2 table + chains)
-    dataset.py                   ManifestImageDataset: CSV manifest -> (tensor, label)
+    dataset.py                   ManifestImageDataset + resolve_image_path
+    corpus.py                    The corpus registry (declared, not globbed)
+    manifest.py                  Recipes: include / filter / assign / split
+    relocate.py                  The one-time move into data/corpora/
+    prune.py                     Orphan sweep (reports, never deletes)
   cache/                       Content-addressed embedding store
     hashing.py                   Image id = blake2b of the file's bytes (memoised)
     store.py                     Sharded float16 vectors + WAL SQLite index
@@ -452,7 +456,6 @@ src/aigc_detect/
 tests/                         Cache invariants + CLI/config contract (`uv run pytest`)
 scripts/
   download_*.py                  Dataset downloaders/indexers, one per corpus
-  make_*.py                      Manifest builders for each tier
   audit_data.py                  Shortcut audit + blind-probe canary (every corpus dir)
   derive_threshold.py            The decision-threshold protocol, as code
   train_instrumented.py          Instrumented replica of the shipping run -> stats/
@@ -460,12 +463,13 @@ scripts/
   plot_stats.py                  Renders the charts
   run_race.py                    Backbone race runner
   worker.py                      Distributed embedding on a second machine
-data/                          gitignored — run `aigc check-env` before assuming.
-                                 Relocatable via $AIGC_DATA_ROOT.
-  raw/ processed/ heldout/ demo_val/ ood/ embeddings/
+data/                          Relocatable via $AIGC_DATA_ROOT. Images are
+                                 gitignored; everything describing them is not.
+  corpora/<id>/                  One corpus: images/ + index.csv + corpus.yaml
+  manifests/<name>.yaml          The recipe; resolved/<name>.csv its rows
   cache/                         The content-addressed store ($AIGC_CACHE_ROOT)
-  aigc_ext/ real_ext/            Modern generators and real-domain corpora
-  quarantine/                    Rejected corpora + the evidence (never train on these)
+  embeddings/                    .npz projections of the store (rebuildable)
+  quarantine/                    A rejected corpus + the evidence (never train on it)
 models/                        Head checkpoints (a few KB each; backbone weights are
                                  downloaded, never saved here). archive/ holds
                                  superseded ablation arms whose numbers the docs cite.

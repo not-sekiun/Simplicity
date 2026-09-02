@@ -47,6 +47,7 @@ import yaml
 
 from aigc_detect.config import DATA_DIR
 from aigc_detect.data.corpus import COLUMNS, assert_trainable, get_corpus
+from aigc_detect.data.dataset import resolve_image_path
 from aigc_detect.log import get_logger
 
 logger = get_logger(__name__)
@@ -139,7 +140,7 @@ def _filter(df: pd.DataFrame, spec: dict, name: str) -> pd.DataFrame:
     if f.get("require_on_disk"):
         # Only for corpora whose index can outlive its files. It is a real
         # check, not a formality: sid_set's builder already carried it.
-        present = df["image_path"].map(lambda p: Path(str(p)).is_file())
+        present = df["image_path"].map(lambda p: resolve_image_path(p).is_file())
         gone = int((~present).sum())
         if gone:
             logger.warning("%s: %d indexed image(s) are not on disk -- dropped", name, gone)

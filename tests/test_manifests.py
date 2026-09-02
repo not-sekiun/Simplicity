@@ -16,11 +16,13 @@ image, so they run anywhere; the tests that need pixels belong to the embedder.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
-from aigc_detect.config import DATA_DIR
 from aigc_detect.data.corpus import all_corpora, get_corpus
+from aigc_detect.data.dataset import resolve_image_path
 from aigc_detect.data.manifest import (
     list_recipes,
     load_recipe,
@@ -28,22 +30,31 @@ from aigc_detect.data.manifest import (
     resolved_path,
 )
 
-#: Where each manifest lived before Tier 5 gathered them. Kept as the migration
-#: proof: as long as these files exist, a recipe must still reproduce them.
-LEGACY = {
-    "train": "processed/train.csv",
-    "val": "processed/val.csv",
-    "train_ext": "processed/train_ext.csv",
-    "heldout": "heldout/heldout.csv",
-    "ood": "ood/ood.csv",
-    "demo_val": "demo_val/demo_val.csv",
-    "wildrf_test": "wildrf/wildrf_test.csv",
-    "wildrf_real": "processed/wildrf_real.csv",
-    "sid_real": "processed/sid_real.csv",
-    "unsplash_real": "processed/unsplash_real.csv",
-    "nano_banana": "processed/nano_banana.csv",
-    "midjourney_v6": "processed/midjourney_v6.csv",
-    "dalle3_holdout": "processed/dalle3_holdout.csv",
+#: Row counts carried over from the hand-built CSVs each recipe replaced.
+#:
+#: These are not arbitrary regression numbers: every one was verified equal to
+#: its pre-Tier-5 manifest ROW FOR ROW, in order, before those files were
+#: deleted (commit 6efd83e, then again after the corpus move). The originals are
+#: gone, so this is what remains of that proof -- and a recipe edit that
+#: silently changes how many images a tier holds now fails here.
+#:
+#: `photo_real` and `aigc_modern` are absent on purpose: both were DECLARED in
+#: config.py as constants and never actually written, so they have no prior
+#: count to preserve.
+MIGRATED_ROW_COUNTS = {
+    "train": 23_800,
+    "val": 4_200,
+    "train_ext": 30_919,
+    "heldout": 7_000,
+    "ood": 8_200,
+    "demo_val": 13_843,
+    "wildrf_test": 2_503,
+    "wildrf_real": 1_555,
+    "sid_real": 4_000,
+    "unsplash_real": 4_000,
+    "nano_banana": 1_500,
+    "midjourney_v6": 1_500,
+    "dalle3_holdout": 1_500,
 }
 
 RECIPES = list_recipes()
@@ -77,13 +88,43 @@ def test_recipe_reproduces_its_resolved_csv(name):
     assert _frames_match(resolve(name), pd.read_csv(committed))
 
 
-@pytest.mark.parametrize("name", sorted(LEGACY))
-def test_resolved_matches_the_manifest_it_replaces(name):
-    """The migration proof: the recipe lands on the pre-Tier-5 rows exactly."""
-    legacy = DATA_DIR / LEGACY[name]
-    if not legacy.exists():
-        pytest.skip(f"legacy manifest {legacy.name} is gone; the recipe is now the only record")
-    assert _frames_match(resolve(name), pd.read_csv(legacy))
+@pytest.mark.parametrize("name", sorted(MIGRATED_ROW_COUNTS))
+def test_recipe_still_holds_the_images_it_inherited(name):
+    """What survives of the migration proof, now that the originals are deleted."""
+    assert len(resolve(name)) == MIGRATED_ROW_COUNTS[name]
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_every_path_is_relative_and_resolves(name):
+    """Manifests are portable artifacts, not machine-specific ones.
+
+    Two assertions in one, and the second is the one with teeth: a relative
+    path that resolves against the wrong root is exactly the failure this tier
+    introduced the risk of, and it is silent -- `sid_real` resolved to ZERO rows
+    during the corpus move because one `require_on_disk` check was still
+    resolving against the working directory.
+    """
+    df = resolve(name)
+    paths = df["image_path"].astype(str)
+    absolute = [p for p in paths if Path(p).is_absolute()]
+    assert not absolute, f"{name}: {len(absolute)} absolute path(s), e.g. {absolute[0]}"
+    assert all("\\" not in p for p in paths), f"{name}: a path carries backslashes"
+
+    # Spot-check rather than stat 100k files: a wrong root fails on any row.
+    for raw in list(paths[:: max(1, len(paths) // 25)])[:25]:
+        assert resolve_image_path(raw).is_file(), f"{name}: does not resolve to a file: {raw}"
+
+
+def test_no_manifest_points_outside_the_data_root():
+    """A committed manifest must not depend on anything but $AIGC_DATA_ROOT.
+
+    demo_val used to fail this: 5,000 of its rows named images by absolute path
+    inside ~/.cache/kagglehub, so a committed manifest depended on a cache
+    directory kagglehub may evict at any time. Tier 5 ingested them.
+    """
+    for name in RECIPES:
+        for raw in resolve(name)["image_path"].astype(str):
+            assert not Path(raw).is_absolute(), f"{name} escapes the data root: {raw}"
 
 
 # -- the rules the recipes are allowed to assume ------------------------------

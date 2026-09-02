@@ -1,0 +1,10 @@
+id: tiny_genimage_heldout
+role: eval
+rows: 7000
+provenance:
+  fetcher: hf
+  repo: TheKernel01/Tiny-GenImage
+  split: validation
+  license: cc-by-nc-sa-4.0
+relocated: '2026-09-02'
+notes: Tiny-GenImage's own validation split, never part of the training pool.

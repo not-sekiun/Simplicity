@@ -1,0 +1,12 @@
+id: wildrf
+role: train
+rows: 4058
+provenance:
+  fetcher: manual
+  paper: Cavia et al., Real-Time Deepfake Detection in the Real-World (arXiv:2406.09398)
+  license: unverified
+relocated: '2026-09-02'
+notes: Real-world social-media images carrying genuine platform re-encoding. Its train
+  reals and test images are WildRF's own disjoint split, but they come from one scrape
+  -- so a low FPR on wildrf_test after training on wildrf_real is an IN-DOMAIN reading,
+  not evidence of generalization.

@@ -1,0 +1,12 @@
+id: aigc_detect_bench
+role: eval
+rows: 8200
+provenance:
+  fetcher: hf
+  repo: TheKernel01/AIGC-Detection-Benchmark
+  split: test
+  license: unverified
+  stream_range: rows 1..8400
+relocated: '2026-09-02'
+notes: The out-of-distribution tier, and the only one with room left to discriminate
+  between backbones.

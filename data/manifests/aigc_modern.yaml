@@ -1,0 +1,8 @@
+# The modern-diffusion training fakes, together.
+#
+# EXCLUDES dalle3_holdout, and that exclusion is the whole point: if every
+# modern generator we can name is also one we train on, the modern-diffusion
+# numbers stop measuring generalization and start measuring memorization. One
+# generator stays unseen so there is something left to measure.
+description: NanoBanana + Midjourney v6. Deliberately excludes the DALL-E 3 holdout.
+include: [nano_banana, midjourney_v6]

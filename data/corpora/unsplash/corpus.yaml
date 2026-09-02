@@ -1,0 +1,12 @@
+id: unsplash
+role: train
+rows: 4000
+provenance:
+  fetcher: hf
+  repo: wtcherr/unsplash_5k
+  split: train
+  license: unverified
+relocated: '2026-09-02'
+notes: A real domain that is not ImageNet. Exists to test whether the real class's
+  domain coverage, not the fake class's, drives the portrait false positives (docs/findings.md
+  2h).

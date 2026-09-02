@@ -1,0 +1,11 @@
+id: wildfake_dalle_advanced
+role: eval
+rows: 8843
+provenance:
+  fetcher: manual
+  source_url: https://modelscope.cn/datasets/hy2628982280/WildFake/summary
+  license: unverified
+relocated: '2026-09-02'
+notes: A manual browser pull -- ModelScope is not reachable programmatically from
+  here, so this corpus cannot be re-fetched by any script. Do not delete its images
+  without a replacement plan.

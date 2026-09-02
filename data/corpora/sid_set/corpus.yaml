@@ -1,0 +1,14 @@
+id: sid_set
+role: train
+rows: 4000
+provenance:
+  fetcher: hf
+  repo: saberzl/SID_Set
+  license: unverified
+relocated: '2026-09-02'
+notes: REALS ONLY are usable. The AIGC half is FLUX imagery composed like stock photography
+  against OpenImages reals, and an 8x8 greyscale probe separates the two halves at
+  0.935 balanced accuracy with geometry controlled (docs/findings.md 1). The `sid_real`
+  recipe keeps label 0 and discards all 4,000 fakes, which removes the correlation
+  by construction. Its index predates the `generator` column, so the recipe assigns
+  one.

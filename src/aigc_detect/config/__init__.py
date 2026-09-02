@@ -32,6 +32,7 @@ from aigc_detect.config.labels import (
 from aigc_detect.config.paths import (
     AIGC_EXT_DIR,
     AIGC_MODERN_MANIFEST,
+    CORPORA_DIR,
     DALLE3_HOLDOUT_MANIFEST,
     DATA_DIR,
     DEMO_VAL_DIR,
@@ -39,6 +40,8 @@ from aigc_detect.config.paths import (
     EMBEDDINGS_DIR,
     HELDOUT_DIR,
     HELDOUT_MANIFEST,
+    MANIFESTS_DIR,
+    MANIFESTS_RESOLVED_DIR,
     MIDJOURNEY_V6_MANIFEST,
     NANO_BANANA_MANIFEST,
     OOD_DIR,
@@ -69,6 +72,7 @@ from aigc_detect.config.settings import (
 __all__ = [
     "AIGC_EXT_DIR",
     "AIGC_MODERN_MANIFEST",
+    "CORPORA_DIR",
     "DALLE3_HOLDOUT_MANIFEST",
     "DATA_DIR",
     "DEMO_VAL_DIR",
@@ -81,6 +85,8 @@ __all__ = [
     "LABEL_AIGC",
     "LABEL_NAMES",
     "LABEL_REAL",
+    "MANIFESTS_DIR",
+    "MANIFESTS_RESOLVED_DIR",
     "MIDJOURNEY_V6_MANIFEST",
     "NANO_BANANA_MANIFEST",
     "NORM_MEAN",

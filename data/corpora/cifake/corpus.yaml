@@ -1,0 +1,11 @@
+id: cifake
+role: dropped
+rows: 120000
+provenance:
+  fetcher: kagglehub
+  handle: birdy654/cifake-real-and-ai-generated-synthetic-images
+  license: unverified
+relocated: '2026-09-02'
+notes: 32x32 upscaled thumbnails; dropped from training. Its 120,000 images were deleted
+  in Tier 1 but the index was left in data/raw/, where `make_splits.py` still globs
+  it. That is the concrete reason this registry exists.

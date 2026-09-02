@@ -1,0 +1,12 @@
+# The union of the two non-ImageNet real domains, as one training source.
+#
+# It exists as a manifest rather than as "pass both --extra-train-manifest
+# flags" so an experiment config can name one thing. `download_real_domains.py
+# --merge` used to write this CSV by hand; it is two lines of YAML instead, and
+# it no longer silently means something different when one of its halves is
+# rebuilt.
+#
+# It was DECLARED in config.py as PHOTO_REAL_MANIFEST and never actually
+# written -- one of two constants naming CSVs that did not exist.
+description: sid_real + unsplash_real, the non-ImageNet real domains together.
+include: [manifest:sid_real, manifest:unsplash_real]

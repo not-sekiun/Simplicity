@@ -9,19 +9,22 @@ wheels/
 # Virtual environments
 .venv
 
-# Data (downloaded datasets, generated splits/manifests, previews)
-data/raw/**
-data/processed/**
-data/demo_val/**
-data/heldout/**
+# Data. Since Tier 5 the rule is one line long: IMAGES are ignored, everything
+# that DESCRIBES them is committed. A corpus's index.csv and corpus.yaml, and
+# every manifest recipe and its resolved CSV, are the contract this project is
+# reproducible against -- they are a few MB and they belong in review.
+data/corpora/*/images/**
+
+# The one exception: data/quarantine holds a REJECTED corpus reduced to a
+# six-image evidence strip and the write-up explaining why. Half a megabyte,
+# and the lesson is the artifact -- an evidence directory that is gitignored is
+# evidence nobody will ever see again.
+
+# Rebuildable from the images: the embedding projections and the
+# content-addressed store (the default $AIGC_CACHE_ROOT, so it lands inside the
+# repo unless pointed elsewhere).
 data/embeddings/**
-# The content-addressed store (tier 4). Rebuildable from the images, and the
-# default $AIGC_CACHE_ROOT, so it lands inside the repo unless pointed elsewhere.
 data/cache/**
-!data/raw/.gitkeep
-!data/processed/.gitkeep
-!data/demo_val/.gitkeep
-!data/heldout/.gitkeep
 *.png
 !docs/**/*.png
 checkpoints/

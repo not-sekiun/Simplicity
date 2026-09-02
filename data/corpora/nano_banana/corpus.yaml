@@ -1,0 +1,9 @@
+id: nano_banana
+role: train
+rows: 1500
+provenance:
+  fetcher: hf
+  repo: bitmind/nano-banana
+  split: train
+  license: unverified
+relocated: '2026-09-02'

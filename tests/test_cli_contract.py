@@ -22,17 +22,24 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Every subcommand `main.py --help` advertised before the restructure began.
+# Every subcommand `main.py --help` advertised before the restructure began,
+# minus the four that Tier 5 deliberately retired.
+#
+# REMOVED ON PURPOSE, and recorded here because this file exists to make
+# accidental removals impossible: `split`, `build-demo-val`, `build-ood` and
+# `build-heldout` each ran one hand-written script to produce one CSV. All four
+# are `aigc manifest resolve <name>` now, driven by a recipe. `split` in
+# particular could not be kept: it built the training manifest by globbing
+# `data/raw/*_index.csv`, a directory that no longer exists, and its last
+# working version would have swept in 120,000 rows of deleted cifake images.
+RETIRED_SUBCOMMANDS = ["split", "build-demo-val", "build-ood", "build-heldout"]
+
 EXPECTED_SUBCOMMANDS = [
     "check-env",
     "download",
-    "split",
     "preview-augment",
     "download-demo",
-    "build-demo-val",
     "download-ood",
-    "build-ood",
-    "build-heldout",
     "audit-data",
     "list-backbones",
     "embed",
@@ -42,6 +49,9 @@ EXPECTED_SUBCOMMANDS = [
     "error-analysis",
     "train-head",
     "predict",
+    "cache",
+    "manifest",
+    "corpus",
 ]
 
 
@@ -76,6 +86,18 @@ def test_no_subcommand_was_silently_added_or_dropped():
     advertised = {c for c in EXPECTED_SUBCOMMANDS if c in proc.stdout}
     missing = set(EXPECTED_SUBCOMMANDS) - advertised
     assert not missing, f"subcommands no longer advertised in --help: {sorted(missing)}"
+
+
+@pytest.mark.parametrize("command", RETIRED_SUBCOMMANDS)
+def test_retired_subcommand_is_gone(command: str):
+    """The four manifest builders are not merely undocumented -- they are gone.
+
+    A retired command that still parses is worse than one that does not: it
+    would run against a data layout that no longer exists and write a manifest
+    nothing reads.
+    """
+    proc = run_cli(command, "--help")
+    assert proc.returncode != 0, f"`{command}` still runs; it was retired in Tier 5"
 
 
 def test_every_package_module_imports():

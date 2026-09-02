@@ -106,12 +106,23 @@ src/aigc_detect/
   inference/predict.py         {image_path, pred} JSON. Owns DECISION_THRESHOLD.
 scripts/                       Ad-hoc corpus pulls and one-off drivers. Being
                                  replaced tier by tier (see below), NOT deleted
-                                 ahead of their replacements.
+                                 ahead of their replacements. The seven
+                                 make_*.py manifest builders WERE deleted in
+                                 tier 5, once recipes replaced them.
 tests/                         Cache-store invariants, CLI contract, config
                                  surface. Written against the invocation, not
                                  import paths, so they survive code moving.
 docs/                          findings, experiments, data, transforms, archive/
-data/                          Gitignored. $AIGC_DATA_ROOT-relocatable.
+data/                          $AIGC_DATA_ROOT-relocatable. Five directories,
+                                 each meaning exactly one thing:
+  corpora/<id>/                  one PROVENANCE: images/ + index.csv +
+                                   corpus.yaml. Images gitignored, the files
+                                   describing them committed.
+  manifests/<name>.yaml          the RECIPE; resolved/<name>.csv the rows it
+                                   currently selects. Both committed.
+  cache/                         the content-addressed embedding store
+  embeddings/                    .npz projections of it (rebuildable, ignored)
+  quarantine/                    a rejected corpus, reduced to evidence
 ```
 
 ## Current state (as of 2026-09-02)
@@ -141,9 +152,33 @@ ten unseen), `wildrf_test` (real social-media re-encoding), and
 robustness grid, error analysis, the deliverable inference script, and the
 demo server + Chrome extension.
 
-**Refactor progress:** Tiers 0–4 are done — safety net, docs consolidation,
-a 35 GB disk scrub, the package restructure, the config package, and the
-content-addressed cache.
+**Refactor progress:** Tiers 0–5 are done — safety net, docs consolidation,
+a 35 GB disk scrub, the package restructure, the config package, the
+content-addressed cache, and the data hierarchy.
+
+**Tier 5, what changed.** `data/` went from eleven top-level directories that
+mixed provenance with evaluation tier to five that each mean one thing. Every
+corpus is declared in `registry/corpora.yaml` and lives at
+`data/corpora/<id>/`; every manifest is a recipe under `data/manifests/`,
+resolved into `resolved/<name>.csv`. Seven `make_*.py` builders and four CLI
+commands (`split`, `build-ood`, `build-heldout`, `build-demo-val`) are gone —
+`aigc manifest resolve <name>` replaces all of them.
+
+- **Manifests are portable.** Every path is now relative to `$AIGC_DATA_ROOT`
+  with POSIX separators, so a committed manifest is not a machine-specific
+  artifact. `demo_val` no longer points into `~/.cache/kagglehub`: its 5,000
+  COCO images were ingested.
+- **The acceptance test passed.** After moving 17.6 GB, `embed-views` on the
+  OOD tier reported *"every requested view is already in the store — no forward
+  passes"*, re-projected all 18 views in 34 seconds, and `eval-grid` returned
+  all 18 AUCs bit-identical. Content addressing is what made the move free.
+- **`never_train` is enforced,** not documented: eval-role corpora raise if a
+  training recipe includes them, and the trainer refuses a flagged manifest.
+- **3.3 GB deleted:** the orphaned pexels corpus, the extracted tiny_genimage
+  archive, and SID_Set's 4,000 discarded FLUX fakes. All three re-fetchable.
+  NOT deleted, and this is the point of the sweep reporting rather than acting:
+  the 648 DALLE2/SDXL images `train_ext` holds back on purpose, and WildRF's
+  1,555 train/val fakes, which no recipe has claimed yet.
 
 **Tier 4, what changed and what it costs you.** An embedding is identified by
 (image bytes, backbone, view spec) and nothing else — not the path, not the row
@@ -165,23 +200,16 @@ the store alone is bit-identical to the one it replaced.
 *absolute path*, so a rename silently redrew every noise realization. They are
 now seeded on the content id, which makes the ~725k path-seeded vectors
 unreproducible by construction — they were deliberately not migrated. Those
-views recompute on their next `embed-views` run (resumable, and only the gaps);
-deterministic views were never affected. `eval-grid` will report a stochastic
-view as STALE until it is re-run.
+views were recomputed for all seven scored eval tiers; deterministic views were
+never affected. The re-embed confirmed the migration: all 12 deterministic view
+AUCs came back IDENTICAL, and the 6 stochastic ones moved by at most 0.0037
+(mean -0.0002) — noise-scale scatter around zero, which is a different random
+draw of the same test rather than a different test. The training views
+(`train`, `train_ext`, ~550k rows) have NOT been recomputed and will report
+STALE until someone runs `aigc embed-views --manifest train --train-chains`.
 
 The remaining tiers, in order:
 
-- **5 — data hierarchy and manifest recipes**, then the image-level prune
-  that tier 4 had to precede (the migration hashes files the prune deletes).
-  **In progress.** The recipe engine is built and every one of the thirteen
-  manifests now resolves from `data/manifests/<name>.yaml` to exactly the rows
-  its committed CSV holds, in the same order (`uv run aigc manifest check`).
-  Still to do: move corpora into `data/corpora/<id>/`, switch manifests to
-  relative POSIX paths, ingest the COCO images out of the kagglehub cache, and
-  act on the orphan sweep. Those all move files, so they wait for any running
-  embed job — and the sweep's result needs reading before anything is deleted:
-  648 of the "unreferenced" images are the DALLE2/SDXL rows `train_ext.yaml`
-  holds back on purpose.
 - **6 — a source registry and resumable fetchers**, replacing the six ad-hoc
   `download_*.py` scripts, with the blind-probe audit as a gate on every pull.
 - **7 — experiment configs and a model bundle** carrying its own threshold;

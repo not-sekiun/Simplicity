@@ -1,0 +1,12 @@
+id: tiny_genimage
+role: train
+rows: 28000
+provenance:
+  fetcher: hf
+  repo: TheKernel01/Tiny-GenImage
+  split: train
+  license: cc-by-nc-sa-4.0
+relocated: '2026-09-02'
+notes: 'The base training pool: 28,000 images across 8 GenImage-era generators plus
+  their reals. `train` and `val` are a seeded 85/15 stratified split of exactly this
+  corpus and nothing else.'

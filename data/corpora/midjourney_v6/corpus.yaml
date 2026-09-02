@@ -1,0 +1,9 @@
+id: midjourney_v6
+role: train
+rows: 1500
+provenance:
+  fetcher: hf
+  repo: Photoroom/midjourney-v6-recap
+  split: train
+  license: unverified
+relocated: '2026-09-02'

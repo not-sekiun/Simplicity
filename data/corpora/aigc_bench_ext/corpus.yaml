@@ -1,0 +1,13 @@
+id: aigc_bench_ext
+role: train
+rows: 7767
+provenance:
+  fetcher: hf
+  repo: TheKernel01/AIGC-Detection-Benchmark
+  split: test
+  license: unverified
+  stream_range: rows 8401+ (the eval tier occupies 1..8400)
+relocated: '2026-09-02'
+notes: 'A generator-diverse training slice taken from the same stream as the `aigc_detect_bench`
+  eval tier, deliberately AFTER it. Disjoint from that tier by construction: the stream
+  order is deterministic and each filename encodes its stream position.'

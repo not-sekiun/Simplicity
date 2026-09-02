@@ -123,7 +123,6 @@ from aigc_detect.cli import (
     embed,
     env,
     evaluate,
-    manifests,
     predict,
     preview,
     recipes,
@@ -138,13 +137,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     env.register_check_env(sub)
     datasets.register_download(sub)
-    manifests.register_split(sub)
     preview.register_preview_augment(sub)
     datasets.register_download_demo(sub)
-    manifests.register_build_demo_val(sub)
     datasets.register_download_ood(sub)
-    manifests.register_build_ood(sub)
-    manifests.register_build_heldout(sub)
     audit.register_audit_data(sub)
     env.register_list_backbones(sub)
     embed.register_embed(sub)

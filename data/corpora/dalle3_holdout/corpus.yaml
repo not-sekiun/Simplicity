@@ -1,0 +1,11 @@
+id: dalle3_holdout
+role: eval
+rows: 1500
+provenance:
+  fetcher: hf
+  repo: OpenDatasets/dalle-3-dataset
+  split: train
+  license: unverified
+relocated: '2026-09-02'
+notes: Held out of training on purpose so one modern-diffusion generator stays genuinely
+  unseen.

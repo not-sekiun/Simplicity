@@ -1,0 +1,8 @@
+id: coco_val2017
+role: eval
+rows: 5000
+provenance:
+  fetcher: kagglehub
+  handle: xthink/coco-2017-val-images
+  license: cc-by-4.0 (COCO annotations); images per Flickr terms
+relocated: '2026-09-02'

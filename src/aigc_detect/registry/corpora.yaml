@@ -10,12 +10,18 @@
 #
 # PATHS ARE RELATIVE TO $AIGC_DATA_ROOT. Nothing here names a drive letter, so
 # the whole tree relocates by moving it and setting one environment variable.
+# Since Tier 5 every corpus lives at `corpora/<id>/{images/, index.csv,
+# corpus.yaml}`; the one exception is the quarantined corpus, which stays out of
+# that tree on purpose -- evidence filed beside the training data is evidence
+# waiting to be trained on by accident.
 #
 # `index` is a corpus's row list: image_path, label, source, and (except for
 # the two oldest) generator. `images` is the directory those rows live under --
 # it is what the Tier 5 move relocates and what the orphan sweep diffs against.
-# A corpus with a `scan` block has no index CSV at all and is enumerated from
-# the directory tree instead (WildRF ships its own train/val/test layout).
+# A corpus may instead carry a `scan` block and be enumerated from its directory
+# tree -- WildRF was, until the Tier 5 move gave it a stable home and its scan
+# order was written out as an ordinary index.csv. Two definitions of one corpus
+# is one too many, so the scan block went with it.
 #
 # `role` is enforced, not documentary:
 #   train       may be included in a training manifest
@@ -33,8 +39,8 @@ corpora:
 
   tiny_genimage:
     role: train
-    index: raw/tiny_genimage_index.csv
-    images: raw/tiny_genimage
+    index: corpora/tiny_genimage/index.csv
+    images: corpora/tiny_genimage/images
     provenance:
       fetcher: hf
       repo: TheKernel01/Tiny-GenImage
@@ -47,8 +53,8 @@ corpora:
 
   sid_set:
     role: train
-    index: raw/sid_set_index.csv
-    images: raw/sid_set
+    index: corpora/sid_set/index.csv
+    images: corpora/sid_set/images
     provenance:
       fetcher: hf
       repo: saberzl/SID_Set
@@ -57,14 +63,18 @@ corpora:
       REALS ONLY are usable. The AIGC half is FLUX imagery composed like stock
       photography against OpenImages reals, and an 8x8 greyscale probe
       separates the two halves at 0.935 balanced accuracy with geometry
-      controlled (docs/findings.md 1). The `sid_real` recipe keeps label 0 and
-      discards all 4,000 fakes, which removes the correlation by construction.
-      Its index predates the `generator` column, so the recipe assigns one.
+      controlled (docs/findings.md 1). The `sid_real` recipe keeps label 0,
+      which removes the correlation by construction. Its index predates the
+      `generator` column, so the recipe assigns one.
+      The 4,000 FLUX fakes were DELETED in Tier 5 (909 MB) and the index cut to
+      its 4,000 reals, so it no longer describes files that are not there.
+      Re-fetchable from `saberzl/SID_Set` if the shortcut ever needs
+      re-demonstrating.
 
   aigc_bench_ext:
     role: train
-    index: train_ext/train_ext_index.csv
-    images: train_ext/images
+    index: corpora/aigc_bench_ext/index.csv
+    images: corpora/aigc_bench_ext/images
     provenance:
       fetcher: hf
       repo: TheKernel01/AIGC-Detection-Benchmark
@@ -79,8 +89,8 @@ corpora:
 
   unsplash:
     role: train
-    index: real_ext/unsplash_index.csv
-    images: real_ext/unsplash
+    index: corpora/unsplash/index.csv
+    images: corpora/unsplash/images
     provenance:
       fetcher: hf
       repo: wtcherr/unsplash_5k
@@ -93,50 +103,38 @@ corpora:
 
   wildrf:
     role: train
-    images: real_ext/WildRF
+    index: corpora/wildrf/index.csv
+    images: corpora/wildrf/images
     provenance:
       fetcher: manual
       paper: "Cavia et al., Real-Time Deepfake Detection in the Real-World (arXiv:2406.09398)"
       license: unverified
-    # No index CSV upstream: WildRF ships its own train/val/test split as
-    # directories, so the corpus is enumerated from the tree. ORDER IS PART OF
-    # THE CONTRACT -- the committed manifests were written in exactly this
-    # sequence, and a recipe filters this list without reordering it.
-    scan:
-      exts: [.jpg, .jpeg, .jfif, .png, .webp, .bmp]
-      dirs:
-        - {dir: train/0_real,          label: 0, source: wildrf_real,     generator: Real_WildRF_train}
-        - {dir: val/0_real,            label: 0, source: wildrf_real,     generator: Real_WildRF_train}
-        - {dir: test/reddit/0_real,    label: 0, source: wildrf_reddit,   generator: Real_WildRF_reddit}
-        - {dir: test/reddit/1_fake,    label: 1, source: wildrf_reddit,   generator: WildRF_reddit}
-        - {dir: test/twitter/0_real,   label: 0, source: wildrf_twitter,  generator: Real_WildRF_twitter}
-        - {dir: test/twitter/1_fake,   label: 1, source: wildrf_twitter,  generator: WildRF_twitter}
-        - {dir: test/facebook/0_real,  label: 0, source: wildrf_facebook, generator: Real_WildRF_facebook}
-        - {dir: test/facebook/1_fake,  label: 1, source: wildrf_facebook, generator: WildRF_facebook}
     notes: >
       Real-world social-media images carrying genuine platform re-encoding.
       Its train reals and test images are WildRF's own disjoint split, but they
       come from one scrape -- so a low FPR on wildrf_test after training on
       wildrf_real is an IN-DOMAIN reading, not evidence of generalization.
+      Its index was generated from WildRF's own train/val/test directory layout,
+      in that order, which is the order the committed manifests carry.
 
   nano_banana:
     role: train
-    index: aigc_ext/nano_banana_index.csv
-    images: aigc_ext/nano_banana
+    index: corpora/nano_banana/index.csv
+    images: corpora/nano_banana/images
     provenance: {fetcher: hf, repo: bitmind/nano-banana, split: train, license: unverified}
 
   midjourney_v6:
     role: train
-    index: aigc_ext/midjourney_v6_index.csv
-    images: aigc_ext/midjourney_v6
+    index: corpora/midjourney_v6/index.csv
+    images: corpora/midjourney_v6/images
     provenance: {fetcher: hf, repo: Photoroom/midjourney-v6-recap, split: train, license: unverified}
 
   # ---- evaluation tiers: never trainable -----------------------------------
 
   tiny_genimage_heldout:
     role: eval
-    index: heldout/tiny_genimage_heldout_index.csv
-    images: heldout/tiny_genimage
+    index: corpora/tiny_genimage_heldout/index.csv
+    images: corpora/tiny_genimage_heldout/images
     provenance:
       fetcher: hf
       repo: TheKernel01/Tiny-GenImage
@@ -147,8 +145,8 @@ corpora:
 
   aigc_detect_bench:
     role: eval
-    index: ood/aigc_detect_bench_index.csv
-    images: ood/images
+    index: corpora/aigc_detect_bench/index.csv
+    images: corpora/aigc_detect_bench/images
     provenance:
       fetcher: hf
       repo: TheKernel01/AIGC-Detection-Benchmark
@@ -161,8 +159,8 @@ corpora:
 
   dalle3_holdout:
     role: eval
-    index: aigc_ext/dalle3_holdout_index.csv
-    images: aigc_ext/dalle3_holdout
+    index: corpora/dalle3_holdout/index.csv
+    images: corpora/dalle3_holdout/images
     provenance: {fetcher: hf, repo: OpenDatasets/dalle-3-dataset, split: train, license: unverified}
     notes: >
       Held out of training on purpose so one modern-diffusion generator stays
@@ -170,12 +168,11 @@ corpora:
 
   coco_val2017:
     role: eval
-    index: demo_val/coco_val2017_index.csv
-    # KNOWN DEFECT, fixed by the Tier 5 ingest: this corpus has no images
-    # directory of its own. Its 5,000 rows point by absolute path into
-    # ~/.cache/kagglehub, so a committed manifest depends on a transient cache
-    # that `kagglehub` may evict at any time.
-    images: null
+    index: corpora/coco_val2017/index.csv
+    # Its 5,000 images were INGESTED out of ~/.cache/kagglehub in Tier 5. The
+    # committed manifest used to point into that cache by absolute path, so it
+    # depended on a directory `kagglehub` may evict at any time.
+    images: corpora/coco_val2017/images
     provenance:
       fetcher: kagglehub
       handle: xthink/coco-2017-val-images
@@ -183,8 +180,8 @@ corpora:
 
   wildfake_dalle_advanced:
     role: eval
-    index: demo_val/wildfake_dalle_advanced_index.csv
-    images: demo_val/wildfake_dalle_advanced
+    index: corpora/wildfake_dalle_advanced/index.csv
+    images: corpora/wildfake_dalle_advanced/images
     provenance:
       fetcher: manual
       source_url: https://modelscope.cn/datasets/hy2628982280/WildFake/summary
@@ -208,22 +205,25 @@ corpora:
 
   cifake:
     role: dropped
-    index: raw/cifake_index.csv
+    index: null
     images: null
     provenance: {fetcher: kagglehub, handle: birdy654/cifake-real-and-ai-generated-synthetic-images, license: unverified}
     notes: >
       32x32 upscaled thumbnails; dropped from training. Its 120,000 images were
       deleted in Tier 1 but the index was left in data/raw/, where
-      `make_splits.py` still globs it. That is the concrete reason this
-      registry exists.
+      `make_splits.py` still globbed it -- the concrete reason this registry
+      exists. The index itself was dropped in Tier 5: 17 MB of absolute paths
+      into a kagglehub cache that no longer exists is not a record of anything,
+      and `corpus.yaml` keeps the part that is. Re-fetchable from
+      `birdy654/cifake-real-and-ai-generated-synthetic-images`.
 
   pexels:
-    role: dropped
+    role: deleted
     index: null
-    images: real_ext/pexels
+    images: null
     provenance: {fetcher: hf, repo: ujin-song/pexels-image-60k, split: train, license: unverified}
     notes: >
-      Fully orphaned: 146 MB of images that no index and no manifest
-      references. `config.py` declared PEXELS_REAL_MANIFEST and
-      PHOTO_REAL_MANIFEST, but neither CSV was ever written. Candidate for the
-      Tier 5 orphan sweep.
+      DELETED in Tier 5 (146 MB). Fully orphaned: no index and no manifest
+      ever referenced it -- `config.py` declared PEXELS_REAL_MANIFEST and
+      PHOTO_REAL_MANIFEST, but neither CSV was written. Re-fetchable from
+      `ujin-song/pexels-image-60k` if a recipe ever wants it.
