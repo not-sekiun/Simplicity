@@ -19,6 +19,16 @@ include them. The current safeguard for that is a structural accident -- the
 splitter only globs one directory -- which is a fact about code, not a rule, and
 it silently stops protecting anything the moment someone globs differently.
 See :func:`assert_trainable`.
+
+THE BLIND-PROBE AUDIT IS ENFORCED HERE TOO, NOT SEPARATELY. Tier 6 added
+`aigc_detect.data.audit`, which runs a blind probe at the end of every pull
+and writes its verdict into the corpus's own `corpus.yaml` (see
+`data/audit/gate.py`). "May this corpus enter a training manifest" was already
+this function's job for `role`; a corpus whose probe cleared the shortcut
+threshold is the same kind of fact as a corpus whose role is `eval`, and a
+second enforcement point next to this one would just be a second place for
+the two to drift apart. `assert_trainable` is the one gate; the audit adds a
+second reason it can fire, not a second function that can.
 """
 
 from __future__ import annotations
@@ -165,6 +175,19 @@ def assert_trainable(corpus_id: str, *, manifest_name: str) -> None:
     """
     corpus = get_corpus(corpus_id)
     if corpus.trainable:
+        from aigc_detect.data.audit.gate import is_suspect
+
+        if is_suspect(corpus_id):
+            raise SystemExit(
+                f"[manifest] '{manifest_name}' is a TRAINING manifest and includes corpus "
+                f"'{corpus_id}', whose blind-probe audit cleared the shortcut threshold -- "
+                f"see its corpus.yaml `audit:` block for the numbers.\n"
+                f"        A label shortcut probably survives in this corpus; training on it "
+                f"risks repeating the SID_Set / SD3 incidents docs/findings.md records.\n"
+                f"        If this verdict is wrong, add `audit: {{override: true, "
+                f"override_reason: \"...\"}}` to data/corpora/{corpus_id}/corpus.yaml "
+                f"deliberately -- do not work around it here."
+            )
         return
     reason = {
         "eval": "it is an evaluation tier -- every published number is measured on it",

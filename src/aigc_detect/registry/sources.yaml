@@ -1,0 +1,343 @@
+# How every non-manual corpus in corpora.yaml gets (re)pulled -- see
+# src/aigc_detect/data/sources.py for why this lives in its own file.
+#
+# COMMON SHAPE. Every entry carries `fetcher` and `license`; everything else is
+# passed through verbatim as that fetcher's config (src/aigc_detect/data/
+# fetchers/). The `hf_streaming` / `hf_parquet` entries share a vocabulary:
+#
+#   repo, split           the HF dataset and split to read
+#   image_col              which feature holds the image (a few sources ship it
+#                          under a different key upstream; the fetcher falls
+#                          back through image/img/jpg/png/photo the way
+#                          `_find_image` in the old download scripts did)
+#   label                 fixed 0/1 for every row pulled (single-label sources)
+#   label_field/label_map per-row label instead, read from the dataset's own
+#                          column (Tiny-GenImage, SID_Set, the OOD benchmark)
+#   generator              fixed generator name, OR generator_field for a
+#                          per-row one
+#   source_name            the `source` column value written to index.csv
+#   cap                     max rows kept; omitted/null = take the whole split
+#   reencode                {format, quality} -- omit to keep native bytes.
+#                          Every AIGC/photography pull re-encodes to JPEG q95
+#                          so file format is never a source-correlated cue a
+#                          detector can read instead of content -- see
+#                          download_aigc_modern.py / download_tiny_genimage.py.
+#   quality_gate            {min_side, max_side, min_saturation,
+#                          max_reject_fraction, min_scanned_before_abort} --
+#                          lifted from download_real_domains.py /
+#                          download_aigc_modern.py. min_saturation is the
+#                          check that caught a depth-map mirror silently
+#                          replacing 4,000 "real" photos (see the comment
+#                          on `pexels` below); max_reject_fraction is the
+#                          corpus-level abort so a wrong mirror fails loudly
+#                          instead of quietly keeping whatever clears the gate.
+#
+# EXCLUDED ON PURPOSE: `sd3` (provenance.repo: unrecorded in corpora.yaml --
+# there is nothing here to write down; see data/sources.py's module docstring).
+
+version: 1
+
+sources:
+
+  # ---- training pool -------------------------------------------------------
+
+  tiny_genimage:
+    fetcher: hf_parquet   # non-streaming: small enough (~8.4GB) to use HF's own
+                           # resumable download cache, see download_tiny_genimage.py
+    repo: TheKernel01/Tiny-GenImage
+    split: train
+    image_col: image
+    label_field: label
+    label_map: {0: real, 1: aigc}
+    generator_field: generator
+    source_name: tiny_genimage
+    filename_prefix: train
+    reencode: {format: jpeg, quality: 95}
+    license: cc-by-nc-sa-4.0
+
+  sid_set:
+    fetcher: hf_streaming
+    repo: saberzl/SID_Set
+    split: train
+    image_col: image
+    # REALS ONLY. The corpus on disk was cut to its 4,000 reals in Tier 5 --
+    # the FLUX half is a labelled-composition shortcut (docs/findings.md 1).
+    # Re-pulling the AIGC half would silently reopen that shortcut, so the
+    # source-level `label` filter keeps this fetcher from ever being asked to.
+    label_field: label
+    label_map: {0: real}
+    generator: null   # index predates the `generator` column; sid_real.yaml assigns one
+    source_name: sid_set
+    cap: 4000
+    reencode: {format: jpeg, quality: 95}
+    license: unverified
+
+  aigc_bench_ext:
+    fetcher: hf_streaming
+    repo: TheKernel01/AIGC-Detection-Benchmark
+    split: test
+    image_col: image
+    label_field: label
+    label_map: {0: real, 1: aigc}
+    generator_field: generator
+    source_name: aigc_bench_ext
+    filename_prefix: ood
+    # LOAD-BEARING: the training slice starts exactly where the eval tier
+    # (aigc_detect_bench, below) ends. Streaming order is deterministic and
+    # every filename encodes its stream position, so this is what makes the
+    # two tiers disjoint by CONSTRUCTION rather than by a post-hoc pixel or
+    # filename comparison -- see download_ood_benchmark.py's skip_rows docstring
+    # and corpora.yaml's `stream_range: rows 8401+` note, which this mirrors.
+    skip_rows: 8400
+    # UNVERIFIED RECONSTRUCTION, flagged rather than guessed silently: the
+    # historical pull that produced the 7,767-row corpus on disk was a
+    # one-off call to download_ood_benchmark.download_ood_benchmark() with
+    # skip_rows=8400 -- the one parameter corpora.yaml itself records -- and
+    # was NOT run through the script's CLI (main() exposes no --skip-rows or
+    # --only-generators flag at all). Its exact per_generator/max_scan/
+    # only_generators arguments are not recorded anywhere in the repo or its
+    # history. The committed corpus holds only 8 of the 10 generators absent
+    # from training (no ProGAN, no WhichFaceIsReal) at ~324 each plus 5,178
+    # reals -- consistent with the function's early-stop firing before those
+    # two rare classes appeared in this stream window, per the same failure
+    # mode reindex_from_disk()'s docstring describes for the eval tier's own
+    # pull. The values below are the function's own defaults, NOT a
+    # reproduction of the historical run -- re-pulling with them will NOT
+    # regenerate a bit-identical 7,767-row corpus. See the Tier 6a report for
+    # the full reasoning; nothing downstream depends on exact reproduction
+    # because train_ext.yaml's `filter.exclude_generators` and the
+    # min_scanned-before-abort gate both tolerate a different quota.
+    per_generator: 200
+    max_scan: 60000
+    min_scan: 2000
+    shuffle_buffer: 0
+    seed: 42
+    real_cap_multiplier: 16
+    only_generators: null   # unknown; see the note above
+    reencode: {format: jpeg, quality: 95}
+    license: unverified
+
+  unsplash:
+    fetcher: hf_streaming
+    repo: wtcherr/unsplash_5k
+    split: train
+    image_col: image
+    label: real
+    generator: Real_Unsplash
+    source_name: unsplash_real
+    cap: 4000
+    reencode: {format: jpeg, quality: 95}
+    quality_gate:
+      min_side: 384
+      max_side: 1536
+      min_saturation: 0.02
+      max_reject_fraction: 0.5
+      min_scanned_before_abort: 200
+    license: unverified
+
+  nano_banana:
+    fetcher: hf_streaming
+    repo: bitmind/nano-banana
+    split: train
+    image_col: image
+    label: aigc
+    generator: NanoBanana
+    source_name: aigc_modern_nano_banana
+    cap: 1500
+    reencode: {format: jpeg, quality: 95}
+    quality_gate:
+      min_side: 384
+      max_side: 1536
+      min_saturation: 0.02
+      max_reject_fraction: 0.5
+      min_scanned_before_abort: 200
+    license: unverified
+
+  midjourney_v6:
+    fetcher: hf_streaming
+    repo: Photoroom/midjourney-v6-recap
+    split: train
+    image_col: image
+    label: aigc
+    generator: MidjourneyV6
+    source_name: aigc_modern_midjourney_v6
+    cap: 1500
+    reencode: {format: jpeg, quality: 95}
+    quality_gate:
+      min_side: 384
+      max_side: 1536
+      min_saturation: 0.02
+      max_reject_fraction: 0.5
+      min_scanned_before_abort: 200
+    license: unverified
+
+  wildrf:
+    fetcher: manual
+    paper: "Cavia et al., Real-Time Deepfake Detection in the Real-World (arXiv:2406.09398)"
+    source_url: "https://github.com/roy1218/RTDD"   # release location for the arXiv:2406.09398 dataset
+    instructions: >
+      No API and no bulk-download endpoint -- fetch the WildRF release
+      described in arXiv:2406.09398 by hand and lay it out under
+      data/corpora/wildrf/images/ exactly as the paper's own train/val/test
+      split (see `expected_layout` below), then run `aigc pull wildrf` to
+      verify and index it. Filenames are not meaningful; only the directory
+      each image sits under is.
+    expected_layout:
+      kind: scan_dirs
+      exts: [.jpg, .jpeg, .jfif, .png, .webp, .bmp]
+      # Order matters: manifests built from this index were committed in
+      # exactly this directory order (see corpora.yaml's wildrf notes and
+      # aigc_detect.data.corpus._scan_rows, which this mirrors).
+      dirs:
+        - {dir: train/0_real,         label: real, source: wildrf_real,     generator: Real_WildRF_train}
+        - {dir: val/0_real,           label: real, source: wildrf_real,     generator: Real_WildRF_train}
+        - {dir: test/reddit/0_real,   label: real, source: wildrf_reddit,   generator: Real_WildRF_reddit}
+        - {dir: test/reddit/1_fake,   label: aigc, source: wildrf_reddit,   generator: WildRF_reddit}
+        - {dir: test/twitter/0_real,  label: real, source: wildrf_twitter,  generator: Real_WildRF_twitter}
+        - {dir: test/twitter/1_fake,  label: aigc, source: wildrf_twitter,  generator: WildRF_twitter}
+        - {dir: test/facebook/0_real, label: real, source: wildrf_facebook, generator: Real_WildRF_facebook}
+        - {dir: test/facebook/1_fake, label: aigc, source: wildrf_facebook, generator: WildRF_facebook}
+    license: unverified
+
+  # ---- evaluation tiers: never trainable -----------------------------------
+
+  tiny_genimage_heldout:
+    fetcher: hf_parquet
+    repo: TheKernel01/Tiny-GenImage
+    split: validation
+    image_col: image
+    label_field: label
+    label_map: {0: real, 1: aigc}
+    generator_field: generator
+    source_name: tiny_genimage_heldout
+    filename_prefix: validation
+    reencode: {format: jpeg, quality: 95}
+    license: cc-by-nc-sa-4.0
+
+  aigc_detect_bench:
+    fetcher: hf_streaming
+    repo: TheKernel01/AIGC-Detection-Benchmark
+    split: test
+    image_col: image
+    label_field: label
+    label_map: {0: real, 1: aigc}
+    generator_field: generator
+    source_name: aigc_detect_bench
+    filename_prefix: ood
+    skip_rows: 0
+    # These ARE the CLI defaults download-ood shipped with (datasets.py
+    # register_download_ood / download_ood_benchmark.py main()), and the
+    # committed 8,200-row corpus matches them: 250 per generator (ProGAN
+    # short at 200 -- it is genuinely rare in this stream, see
+    # reindex_from_disk()'s docstring), 4,000 reals (250 * 16).
+    per_generator: 250
+    max_scan: 60000
+    min_scan: 2000
+    shuffle_buffer: 0
+    seed: 42
+    real_cap_multiplier: 16
+    only_generators: null   # every generator class, seen and unseen alike
+    reencode: {format: jpeg, quality: 95}
+    license: unverified
+
+  dalle3_holdout:
+    fetcher: hf_streaming
+    repo: OpenDatasets/dalle-3-dataset
+    split: train
+    image_col: image
+    label: aigc
+    generator: DALLE3
+    source_name: aigc_modern_dalle3_holdout
+    cap: 1500
+    reencode: {format: jpeg, quality: 95}
+    quality_gate:
+      min_side: 384
+      max_side: 1536
+      min_saturation: 0.02
+      max_reject_fraction: 0.5
+      min_scanned_before_abort: 200
+    license: unverified
+
+  coco_val2017:
+    fetcher: kagglehub
+    handle: xthink/coco-2017-val-images
+    layout: {kind: flat, pattern: "*.jpg"}
+    label: real
+    source_name: coco_val2017
+    # No re-encode: the demo-val "real" half is meant to be pristine JPEG as
+    # shipped by the mirror, unlike the AIGC/photography pulls above.
+    # Fallback documented, not automated by this fetcher (see http.py's
+    # module docstring): the official S3 bucket
+    # (http://images.cocodataset.org/zips/val2017.zip) was observed throttled
+    # to ~12kB/s (18+ hr ETA) on this network versus Kaggle's ~20MB/s: run
+    # `aigc pull coco_val2017 --force` again later, or fetch the zip by hand
+    # and use the `manual` path, if the Kaggle mirror is ever pulled.
+    license: "cc-by-4.0 (COCO annotations); images per Flickr terms"
+
+  wildfake_dalle_advanced:
+    fetcher: manual
+    source_url: "https://modelscope.cn/datasets/hy2628982280/WildFake/summary"
+    instructions: >
+      ModelScope is not reachable from this network at the API or SDK level
+      (confirmed via curl and the modelscope Python SDK, both hanging
+      indefinitely) even though the page itself loads -- this matches the
+      challenge brief's own note about needing a translate-button step.
+      Open the URL above, use the page's translate button if needed, find the
+      "DALL-E Advanced" generator subset, and extract its images into
+      data/corpora/wildfake_dalle_advanced/images/ (any layout -- every image
+      file found anywhere under it is indexed). Then run
+      `aigc pull wildfake-dalle-advanced` to verify and index them.
+    expected_layout:
+      kind: flat_recursive
+      exts: [.jpg, .jpeg, .png, .webp]
+    label: aigc
+    generator: null   # source's own index predates a generator column too
+    source_name: wildfake_dalle_advanced
+    license: unverified
+
+  # ---- rejected and retired --------------------------------------------------
+  # Re-fetchable per corpora.yaml's own notes, so registered like everything
+  # else -- see registry/sources.yaml's header and data/sources.py's docstring
+  # for why `sd3` (repo genuinely unrecorded) is the one deliberate exception.
+
+  cifake:
+    fetcher: kagglehub
+    handle: birdy654/cifake-real-and-ai-generated-synthetic-images
+    # Known layout: {train,test}/{REAL,FAKE}/*.jpg. Preserved under images/ as
+    # <split>/<REAL|FAKE>/<file> (not flattened) because REAL and FAKE filenames
+    # repeat across the two splits -- flattening would silently overwrite rows.
+    layout: {kind: label_dirs, label_dirs: {REAL: real, FAKE: aigc}, preserve_subpath: true}
+    source_name: cifake
+    # No re-encode: CIFAKE ships pre-baked 32x32-upscaled thumbnails, and
+    # re-encoding a thumbnail does not undo that -- see corpora.yaml's
+    # dropped-role note on why it stays out of training regardless.
+    license: unverified
+
+  pexels:
+    fetcher: hf_streaming
+    repo: ujin-song/pexels-image-60k
+    split: train
+    image_col: image
+    label: real
+    generator: Real_Pexels
+    source_name: pexels_real
+    cap: 4000
+    reencode: {format: jpeg, quality: 95}
+    quality_gate:
+      min_side: 384
+      # pexels-image-60k ships full-resolution originals (6000x4000+); without
+      # this cap it would be the only corpus reaching the backbone's 336px via
+      # an outlier downscale -- a source-correlated resampling cue. See
+      # download_real_domains.py's MAX_SIDE comment.
+      max_side: 1536
+      min_saturation: 0.02
+      max_reject_fraction: 0.5
+      min_scanned_before_abort: 200
+    license: unverified
+    notes: >
+      NOT the cj-mills/pexels-110k-...-depth-anything-large-hf mirror. That
+      archive's images/ folder holds Depth Anything OUTPUTS (single-channel
+      depth maps) rather than photographs -- every member is mode=L, which
+      convert("RGB") silently widens without complaining, and it cleared every
+      gate except this one's min_saturation. See download_real_domains.py's
+      SOURCES comment for the full incident; do not repoint this at that repo.

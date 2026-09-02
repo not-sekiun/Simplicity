@@ -125,6 +125,7 @@ from aigc_detect.cli import (
     evaluate,
     predict,
     preview,
+    pull,
     recipes,
     train,
 )
@@ -152,6 +153,7 @@ def build_parser() -> argparse.ArgumentParser:
     cache.register_cache(sub)
     recipes.register_manifest(sub)
     recipes.register_corpus(sub)
+    pull.register_pull(sub)
 
     return parser
 

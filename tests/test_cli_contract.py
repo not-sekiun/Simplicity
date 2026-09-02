@@ -52,6 +52,7 @@ EXPECTED_SUBCOMMANDS = [
     "cache",
     "manifest",
     "corpus",
+    "pull",
 ]
 
 
