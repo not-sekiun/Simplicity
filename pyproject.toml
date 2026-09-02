@@ -47,13 +47,22 @@ viz = [
 # The package lives under src/. Declaring it here is what makes
 # `import aigc_detect` work from anywhere -- before this, every script and both
 # entry points opened with a `sys.path.insert(0, .../src)` preamble (23 files).
+#
+# `apps` (tier 8b) holds first-class applications that are not part of the
+# graded deliverable -- today just `apps/server`, the demo's FastAPI server --
+# packaged the same way so `import apps.server` works from anywhere and
+# `aigc-serve` (below) is installable, with no `sys.path` hack reintroduced.
 [tool.hatch.build.targets.wheel]
-packages = ["src/aigc_detect"]
+packages = ["src/aigc_detect", "apps"]
 
 # `aigc <command>` is the real entry point. main.py at the repo root is kept as
 # a thin shim so the documented `uv run main.py ...` invocations keep working.
+# `aigc-serve` is the demo server (see apps/server/app.py); it needs the `demo`
+# extra installed (`uv sync --extra demo`) since fastapi/uvicorn/requests live
+# there, not in the base dependency set -- it is NOT a graded deliverable.
 [project.scripts]
 aigc = "aigc_detect.cli:main"
+aigc-serve = "apps.server.app:main"
 
 [dependency-groups]
 dev = [

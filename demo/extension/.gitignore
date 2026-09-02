@@ -1,0 +1,6 @@
+# Fetched by `npm install`, not committed -- see package.json.
+node_modules/
+# Build output of `npm run build` (build.js): dist/chrome/, dist/firefox/.
+# Regenerated from src/ on demand; committing it would just be a second,
+# driftable copy of the source tree.
+dist/
