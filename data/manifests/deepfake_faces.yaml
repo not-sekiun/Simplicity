@@ -1,0 +1,5 @@
+# The training half of the end-to-end pipeline check -- see registry/sources.yaml.
+# Not part of any shipping recipe; it exists to exercise pull -> audit -> resolve
+# -> embed -> train -> evaluate on a corpus the project had never seen.
+description: Deepfake-vs-real faces, the publisher's train split.
+include: [deepfake_faces]

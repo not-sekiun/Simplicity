@@ -227,3 +227,21 @@ corpora:
       ever referenced it -- `config.py` declared PEXELS_REAL_MANIFEST and
       PHOTO_REAL_MANIFEST, but neither CSV was written. Re-fetchable from
       `ujin-song/pexels-image-60k` if a recipe ever wants it.
+
+  # ---- end-to-end pipeline check -------------------------------------------
+  # See sources.yaml's entries of the same names. `deepfake_faces_test` is the
+  # publisher's own test split and carries role: eval, so a training recipe
+  # that includes it raises -- the same enforcement every other eval tier gets,
+  # applied to a corpus that arrived after the rule existed.
+
+  deepfake_faces:
+    role: train
+    index: corpora/deepfake_faces/index.csv
+    images: corpora/deepfake_faces/images
+    provenance: {fetcher: hf, repo: itsLeen/deepfake_vs_real_image_detection, split: train, license: unverified}
+
+  deepfake_faces_test:
+    role: eval
+    index: corpora/deepfake_faces_test/index.csv
+    images: corpora/deepfake_faces_test/images
+    provenance: {fetcher: hf, repo: itsLeen/deepfake_vs_real_image_detection, split: test, license: unverified}

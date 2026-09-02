@@ -14,6 +14,13 @@ wheels/
 # every manifest recipe and its resolved CSV, are the contract this project is
 # reproducible against -- they are a few MB and they belong in review.
 data/corpora/*/images/**
+# A pull's resume state is per-machine and MUST NOT travel with the repo: a
+# fresh clone that had this file would believe `rows_written` rows are already
+# on disk and resume past them, producing a corpus with holes and a state file
+# claiming it is complete -- the exact failure fetchers/base.py orders its
+# writes to prevent. The index.csv and corpus.yaml beside it ARE committed;
+# they describe the corpus, not one machine's progress through it.
+data/corpora/*/.pull_state.json
 
 # The one exception: data/quarantine holds a REJECTED corpus reduced to a
 # six-image evidence strip and the write-up explaining why. Half a megabyte,

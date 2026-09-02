@@ -43,7 +43,7 @@ def register_embed(sub):
         "embed", help='Precompute + cache pooled embeddings for a manifest under data/embeddings/.'
     )
     p_embed.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
-    p_embed.add_argument("--manifest", required=True, choices=MANIFEST_CHOICES)
+    p_embed.add_argument("--manifest", required=True, choices=MANIFEST_CHOICES or None)
     p_embed.add_argument("--batch-size", type=int, default=64)
     p_embed.add_argument("--num-workers", type=int, default=4)
     p_embed.add_argument("--force", action="store_true", help="Recompute even if the cached .npz already exists.")
@@ -59,7 +59,7 @@ def register_embed_views(sub):
         help="Precompute cached embeddings for every robustness view (5.2 table) of a manifest.",
     )
     p_embed_views.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
-    p_embed_views.add_argument("--manifest", required=True, choices=MANIFEST_CHOICES)
+    p_embed_views.add_argument("--manifest", required=True, choices=MANIFEST_CHOICES or None)
     p_embed_views.add_argument(
         "--views", nargs="+", default=None, metavar="VIEW",
         help="Only compute these views (default: all 18). E.g. --views clean blur_sigma2.0 chain_heavy",

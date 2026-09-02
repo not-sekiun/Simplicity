@@ -56,7 +56,7 @@ def register_eval_grid(sub):
         "eval-grid", help="Score a trained head across every cached robustness view (5.5.4)."
     )
     p_eval_grid.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
-    p_eval_grid.add_argument("--manifest", required=True, choices=MANIFEST_CHOICES)
+    p_eval_grid.add_argument("--manifest", required=True, choices=MANIFEST_CHOICES or None)
     p_eval_grid.add_argument("--head", default=None, help="Head checkpoint (default: models/<backbone>__<kind>.pt).")
     p_eval_grid.add_argument("--head-kind", default="linear", choices=["linear", "mlp"],
                              help="Only used to locate the default checkpoint path.")
@@ -80,7 +80,7 @@ def register_error_analysis(sub):
              "Needs embed-views cached for the same (backbone, manifest, sample-rows) first.",
     )
     p_err.add_argument("--backbone", required=True, help="Backbone registry key, e.g. pe-core-l.")
-    p_err.add_argument("--manifest", required=True, choices=MANIFEST_CHOICES)
+    p_err.add_argument("--manifest", required=True, choices=MANIFEST_CHOICES or None)
     p_err.add_argument("--head", default=None, help="Head checkpoint (default: models/<backbone>__<kind>.pt).")
     p_err.add_argument("--head-kind", default="linear", choices=["linear", "mlp"],
                         help="Only used to locate the default checkpoint path.")

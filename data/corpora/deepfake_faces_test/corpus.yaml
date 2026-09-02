@@ -1,0 +1,13 @@
+id: deepfake_faces_test
+audit:
+  n: 400
+  balanced_acc: 0.5435
+  roc_auc: 0.5268
+  skipped: false
+  suspect: false
+  threshold: 0.7
+  probe: blind_16x16_greyscale_logreg
+  basis: self (both labels present)
+  sample: 600
+  seed: 42
+  audited_at: '2026-09-03'

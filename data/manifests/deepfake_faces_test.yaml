@@ -1,0 +1,6 @@
+# The publisher's own test split, kept as an evaluation tier. `never_train` is
+# not decoration: the corpus is role: eval in corpora.yaml, so a training recipe
+# that included it would raise, and a trainer handed THIS manifest raises too.
+description: Deepfake-vs-real faces, the publisher's held-out test split.
+never_train: true
+include: [deepfake_faces_test]

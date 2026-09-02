@@ -341,3 +341,58 @@ sources:
       convert("RGB") silently widens without complaining, and it cleared every
       gate except this one's min_saturation. See download_real_domains.py's
       SOURCES comment for the full incident; do not repoint this at that repo.
+
+  # ---- end-to-end pipeline check -------------------------------------------
+  #
+  # A corpus this project had never seen, added to exercise the whole path in
+  # one go: declare a source, pull it, let the audit gate judge it, resolve a
+  # recipe, embed, train, evaluate. It is NOT part of any shipping recipe.
+  #
+  # Chosen because the publisher ships its OWN train/test split, so the eval
+  # tier is separated upstream rather than by a split this project performed --
+  # the two corpora below are that split, one source entry each, which is also
+  # how tiny_genimage and tiny_genimage_heldout are declared.
+  #
+  # ClassLabel order upstream is ['Fake', 'Real'], hence the label_map: 0 is
+  # the AI-generated half here, which is the OPPOSITE of Tiny-GenImage's
+  # convention. Getting this backwards produces a detector that is confidently
+  # inverted and a clean AUC near zero, so it is written down rather than
+  # assumed.
+
+  deepfake_faces:
+    fetcher: hf_streaming
+    repo: itsLeen/deepfake_vs_real_image_detection
+    split: train
+    image_col: image
+    label_field: label
+    label_map: {0: aigc, 1: real}
+    generator: unknown_deepfake
+    source_name: deepfake_faces
+    cap: 1200
+    reencode: {format: jpeg, quality: 95}
+    quality_gate:
+      min_side: 256
+      max_side: 1024
+      min_saturation: 0.02
+      max_reject_fraction: 0.5
+      min_scanned_before_abort: 200
+    license: unverified
+
+  deepfake_faces_test:
+    fetcher: hf_streaming
+    repo: itsLeen/deepfake_vs_real_image_detection
+    split: test
+    image_col: image
+    label_field: label
+    label_map: {0: aigc, 1: real}
+    generator: unknown_deepfake
+    source_name: deepfake_faces_test
+    cap: 400
+    reencode: {format: jpeg, quality: 95}
+    quality_gate:
+      min_side: 256
+      max_side: 1024
+      min_saturation: 0.02
+      max_reject_fraction: 0.5
+      min_scanned_before_abort: 200
+    license: unverified

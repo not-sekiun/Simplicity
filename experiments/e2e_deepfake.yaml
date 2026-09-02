@@ -1,0 +1,40 @@
+# End-to-end pipeline check on a corpus this project had never seen.
+#
+# NOT A RESEARCH RECIPE and not a ship candidate. Its whole purpose is to run
+# the full path once -- declare a source, pull it, let the audit gate judge it,
+# resolve a recipe, embed, train, calibrate, evaluate -- on data that entered
+# the project after every one of those pieces was built.
+#
+# THREE TRANSFORMS, NOT EIGHTEEN. clean + jpeg_q70 + resize_0.5x + blur_sigma1.0
+# is one representative per axis the brief's 5.2 table covers (compression,
+# scale, focus) and all three are DETERMINISTIC, so the run is reproducible from
+# the content-addressed store with no reseeding. The severity ladder and the
+# chained views are what a real recipe adds; see allsev_e1.yaml.
+#
+# READ THE NUMBERS WITH THE CORPUS IN MIND. Its AIGC half is 98.7% square and
+# its real half 3.1%, which is the SID_Set aspect-ratio shortcut over again
+# (docs/findings.md 1). transforms.py's aspect-preserving resize + square
+# centre crop is what stops the head from seeing it, and is the reason this
+# corpus is trainable at all rather than a leak with a good score.
+description: >
+  Pipeline check: deepfake-vs-real faces, clean + three transforms, trained on
+  the publisher's train split and scored on its own held-out test split.
+trainer:
+  kind: probe
+manifest: deepfake_faces
+backbone: pe-core-l
+views: [clean, jpeg_q70, resize_0.5x, blur_sigma1.0]
+features:
+  - {op: gather, backbone: pe-core-l}
+  - {op: standardize}
+head:
+  kind: linear
+train:
+  epochs: 2
+  lr: 1.0e-3
+  batch_size: 128
+  weight_decay: 0.0
+val:
+  manifest: deepfake_faces_test
+balance: true
+seed: 42
