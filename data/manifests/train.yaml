@@ -1,0 +1,12 @@
+# The training pool: a seeded 85/15 stratified split of Tiny-GenImage.
+#
+# Stratified by (source, label), NOT by generator -- spreading each generator
+# across both halves would defeat held-out-generator evaluation, which is most
+# of what `val` is for.
+#
+# This recipe and `val.yaml` must stay in lockstep: they are two halves of ONE
+# split, so a change to `fraction`, `seed` or `by` in either file without the
+# other silently produces overlapping train and val sets.
+description: Tiny-GenImage, 85% training half.
+include: [tiny_genimage]
+split: {kind: stratified, by: [source, label], fraction: 0.15, seed: 42, take: train}

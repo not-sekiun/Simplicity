@@ -1,0 +1,6 @@
+# The other half of `train`'s split -- see train.yaml. Held out of training but
+# NOT `never_train`-flagged, because it is drawn from the same corpus as train
+# and its role is in-distribution validation, not an independent benchmark.
+description: Tiny-GenImage, 15% validation half.
+include: [tiny_genimage]
+split: {kind: stratified, by: [source, label], fraction: 0.15, seed: 42, take: val}

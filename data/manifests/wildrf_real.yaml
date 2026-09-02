@@ -1,0 +1,11 @@
+# WildRF's train+val reals, as a TRAINING source.
+#
+# Disjoint from `wildrf_test` by WildRF's own split, but drawn from the same
+# scrape -- so a low FPR on wildrf_test after training on this is an IN-DOMAIN
+# reading. It says the head can fit this distribution, not that it generalizes
+# to unseen real domains. The honest generalization number comes from the arm
+# trained on Unsplash only and evaluated on wildrf_test.
+description: WildRF train/val reals, a real-world training domain.
+include: [wildrf]
+filter:
+  sources: [wildrf_real]

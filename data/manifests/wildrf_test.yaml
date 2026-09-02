@@ -1,0 +1,14 @@
+# WildRF's own test split, both classes, kept per-platform so the grid's
+# per-real-source FPR table can break it down rather than pooling it -- the
+# point of that table being that an aggregate hides a subpopulation failure
+# (docs/findings.md 2h).
+#
+# The AIGC half is real-world social-media fakes of unknown provenance, which
+# is far closer to the competition's "unknown generator" condition than the
+# GenImage-era training fakes. It is filed under family `social` so it never
+# enters the in-scope diffusion mean.
+description: WildRF test tier, real and fake, per platform.
+never_train: true
+include: [wildrf]
+filter:
+  sources: [wildrf_reddit, wildrf_twitter, wildrf_facebook]

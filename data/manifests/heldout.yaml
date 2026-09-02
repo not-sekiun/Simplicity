@@ -1,0 +1,4 @@
+# Tiny-GenImage's own validation split: images the training pool never saw.
+description: Cross-generator held-out tier from Tiny-GenImage's validation split.
+never_train: true
+include: [tiny_genimage_heldout]

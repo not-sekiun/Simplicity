@@ -1,0 +1,23 @@
+# `train` plus a generator-diverse slice from AIGC-Detection-Benchmark.
+#
+# WHY DALLE2 AND SDXL ARE EXCLUDED. The slice contains them, and training on
+# them would take the OOD tier from 9 unseen-generator cells to 1, and from
+# three in-scope unseen DIFFUSION cells to zero. The OOD score would rise with
+# no way to tell genuine generalization from "we now train on what we test".
+# DALLE2 in particular is the worst cell in the whole grid (clean 0.9278 ->
+# degraded 0.8020); if generator diversity transfers, it must improve WITHOUT
+# having been trained on. That is the only evidence that says anything about
+# the competition's unknown generators.
+#
+# LEAKAGE, STATED PLAINLY. The slice is disjoint from the `ood` tier by
+# construction (deterministic stream order, positions 8401+). It is NOT
+# provably disjoint from `val`: both corpora draw on GenImage upstream, so the
+# same source image could appear in both under different filenames. The fake
+# halves cannot collide (the slice keeps only generators absent from
+# Tiny-GenImage); the reals can. That would inflate `val` and not `ood`, which
+# is a detectable signature -- if val improves far more than ood after adding
+# this data, suspect real-image leakage rather than a genuine gain.
+description: train + the disjoint generator-diverse slice, minus two held-back generators.
+include: [manifest:train, aigc_bench_ext]
+filter:
+  exclude_generators: [DALLE2, SDXL]

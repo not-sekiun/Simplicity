@@ -1,0 +1,7 @@
+# Held out of training deliberately so at least one modern-diffusion generator
+# stays genuinely unseen. Without it, every modern generator we can name is
+# also one we train on, and the modern-diffusion numbers stop measuring
+# generalization.
+description: DALL-E 3 fakes, held out of training as an unseen modern generator.
+never_train: true
+include: [dalle3_holdout]

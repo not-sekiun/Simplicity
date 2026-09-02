@@ -1,0 +1,6 @@
+# A real domain that is not ImageNet, as a training source. Companion to
+# sid_real: together they are the cheapest available test of the hypothesis
+# that real-class domain coverage, not fake-class diversity, drives the
+# portrait false positives.
+description: Unsplash photographs, a real-domain training source.
+include: [unsplash]

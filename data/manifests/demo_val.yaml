@@ -1,0 +1,10 @@
+# The brief's external benchmark (5.4): "Do not use the following data during
+# training." That instruction is what `never_train` exists to make enforceable
+# rather than merely written down.
+#
+# KNOWN DEFECT: the coco_val2017 half indexes images by absolute path inside
+# ~/.cache/kagglehub, so this manifest currently depends on a transient cache
+# directory. The Tier 5 ingest moves those images into the corpus tree.
+description: The brief's self-reported external benchmark; never trained on.
+never_train: true
+include: [coco_val2017, wildfake_dalle_advanced]

@@ -1,0 +1,5 @@
+# The out-of-distribution tier, and the only one with room left to discriminate
+# between backbones -- which is why the backbone race is scored on it.
+description: Out-of-distribution evaluation tier (AIGC-Detection-Benchmark).
+never_train: true
+include: [aigc_detect_bench]

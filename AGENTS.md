@@ -63,10 +63,21 @@ src/aigc_detect/
                                    (module, pooled_dim, native_res). Asserts
                                    <2e9 params. Ship the VISION TOWER only.
     heads.py                     LinearHead / MLPHead / build_head(kind, in_dim)
+    corpora.yaml                 Every image corpus, DECLARED not globbed, with
+                                   its role. `role: eval` is enforced, not
+                                   documentary — see data/corpus.py.
   data/
     transforms.py                The brief's exact 5.2 transform table — don't
                                    change parameter values without checking it.
     dataset.py                   ManifestImageDataset: CSV -> (tensor, label)
+    corpus.py                    Reads corpora.yaml. A corpus is a PROVENANCE:
+                                   one pull, one image dir, one row list.
+    manifest.py                  Recipes: a manifest is a declarative selection
+                                   over corpora (include/filter/assign/split),
+                                   not a hand-built CSV. Replaces the seven
+                                   make_*.py scripts.
+    prune.py                     The orphan sweep. Reports, never deletes —
+                                   "unreferenced" is evidence, not a verdict.
   cache/                       The content-addressed embedding store (tier 4).
     hashing.py                   blake2b-128 of a file's bytes = its image id,
                                    memoised as (path, mtime, size) -> id.
@@ -162,6 +173,15 @@ The remaining tiers, in order:
 
 - **5 — data hierarchy and manifest recipes**, then the image-level prune
   that tier 4 had to precede (the migration hashes files the prune deletes).
+  **In progress.** The recipe engine is built and every one of the thirteen
+  manifests now resolves from `data/manifests/<name>.yaml` to exactly the rows
+  its committed CSV holds, in the same order (`uv run aigc manifest check`).
+  Still to do: move corpora into `data/corpora/<id>/`, switch manifests to
+  relative POSIX paths, ingest the COCO images out of the kagglehub cache, and
+  act on the orphan sweep. Those all move files, so they wait for any running
+  embed job — and the sweep's result needs reading before anything is deleted:
+  648 of the "unreferenced" images are the DALLE2/SDXL rows `train_ext.yaml`
+  holds back on purpose.
 - **6 — a source registry and resumable fetchers**, replacing the six ad-hoc
   `download_*.py` scripts, with the blind-probe audit as a gate on every pull.
 - **7 — experiment configs and a model bundle** carrying its own threshold;

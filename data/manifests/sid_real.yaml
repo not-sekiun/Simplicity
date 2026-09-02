@@ -1,0 +1,29 @@
+# SID_Set's REAL half only. All 4,000 fakes are discarded.
+#
+# SID_Set was dropped from training because of a shortcut that lives in the
+# RELATIONSHIP between its halves, not in the images: its fakes are FLUX
+# imagery composed like stock photography, its reals are cluttered OpenImages
+# photographs, and an 8x8 greyscale probe separates the two at 0.935 balanced
+# accuracy with geometry fully controlled (docs/findings.md 1). A composition
+# shortcut is only exploitable when composition correlates with the LABEL --
+# so keeping one label removes the correlation by construction. Nothing here
+# carries label 1, and "composed like stock imagery" has no AIGC side to point
+# at.
+#
+# It is here to test whether the REAL class's domain coverage drives the
+# portrait false positives: our entire real pool is ImageNet, and every one of
+# ood's 110 WhichFaceIsReal portraits is called AI-generated with probability
+# 1.000 (docs/findings.md 2h). OpenImages is a different real domain already on
+# disk. It contains people but not FFHQ-style close-up portraits, so this is a
+# partial probe of that failure, not a fix for it.
+#
+# The index predates the `generator` column and calls everything `sid_set`, so
+# the rows are renamed to what they actually are.
+description: SID_Set reals only (OpenImages), as a real-domain training source.
+include: [sid_set]
+filter:
+  label: 0
+  require_on_disk: true
+assign:
+  source: sid_set_real
+  generator: Real_OpenImages
