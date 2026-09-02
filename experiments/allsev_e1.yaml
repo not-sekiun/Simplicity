@@ -1,0 +1,53 @@
+# The shipping recipe: models/pe-core-l__linear__allsev_e1.pt, threshold 0.980.
+#
+# This is the declared form of the seven-flag command that trained it:
+#
+#   uv run main.py train-head-views --backbone pe-core-l --all-severities \
+#     --val-sample-rows 2000 --train-manifest train-ext \
+#     --extra-train-manifest sid-real unsplash-real nano-banana midjourney-v6 \
+#     --balance --epochs 1 --out models/pe-core-l__linear__allsev_e1.pt
+#
+# Every flag on that line is load-bearing and has a field here:
+#   --all-severities          -> views: all_severities
+#   --train-manifest train-ext -> manifest: train_ext
+#   --extra-train-manifest ... -> extra_train
+#   --balance                 -> balance: true
+#   --epochs 1                -> train.epochs (NOT the paper-default 2 -- see
+#                                 inference/predict.py's DECISION_THRESHOLD
+#                                 comment for why epoch 2 overfits robustness)
+#   --val-sample-rows 2000    -> val.sample_rows
+#
+# `aigc experiment run allsev_e1` additionally does what the old three-step
+# manual process did not reliably do: derive the threshold (train.calibrate)
+# and save it, the fitted feature pipeline, and the backbone identity together
+# in one bundle (inference.bundle), instead of a checkpoint plus a module
+# constant three files away that someone has to remember to update.
+description: >
+  Shipping head. Frozen pe-core-l, linear probe, all 19 non-scored-chain views,
+  train_ext + four modern-generator/real-domain manifests, class-balanced,
+  1 epoch.
+trainer:
+  kind: probe
+manifest: train_ext
+backbone: pe-core-l
+views: all_severities
+features:
+  - {op: gather, backbone: pe-core-l}
+  - {op: standardize}
+head:
+  kind: linear
+train:
+  epochs: 1
+  lr: 1.0e-3
+  batch_size: 128
+  weight_decay: 0.0
+val:
+  manifest: val
+  sample_rows: 2000
+extra_train:
+  - {manifest: sid_real}
+  - {manifest: unsplash_real}
+  - {manifest: nano_banana}
+  - {manifest: midjourney_v6}
+balance: true
+seed: 42

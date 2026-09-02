@@ -47,6 +47,14 @@ def _manifest(name: str):
 # them.
 EMBEDDINGS_DIR = DATA_DIR / "embeddings"
 
+# Tier 7: one directory per `aigc experiment run`, named for the run id. Holds
+# the resolved config, the bundle, the eval grid and the derived threshold --
+# everything `train.experiment` produced, so a run is inspectable and
+# reproducible without grepping console output. Under DATA_DIR, not ROOT_DIR:
+# a run directory is an OUTPUT of training on this machine's data, same
+# category as embeddings/ and cache/, not something committed to the repo.
+RUNS_DIR = DATA_DIR / "runs"
+
 # --- Training pool -----------------------------------------------------------
 
 TRAIN_MANIFEST = _manifest("train")
@@ -156,6 +164,7 @@ __all__ = [
     "RAW_DIR",
     "REAL_EXT_DIR",
     "ROOT_DIR",
+    "RUNS_DIR",
     "SID_REAL_MANIFEST",
     "TRAIN_EXT_MANIFEST",
     "TRAIN_MANIFEST",

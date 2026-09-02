@@ -9,8 +9,12 @@ def _open():
     from aigc_detect.cache.hashing import HashCache
     from aigc_detect.cache.store import EmbeddingStore
 
-    root = get_settings().cache_root
-    return EmbeddingStore(root / "embeddings"), HashCache(root / "hashes.sqlite"), root
+    settings = get_settings()
+    return (
+        EmbeddingStore(settings.store_root),
+        HashCache(settings.hash_db_path),
+        settings.cache_root,
+    )
 
 
 def cmd_cache_status(_args):

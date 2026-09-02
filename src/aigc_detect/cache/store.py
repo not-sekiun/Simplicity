@@ -446,13 +446,34 @@ class EmbeddingStore:
         return {"shards_rewritten": rewritten, "bytes_reclaimed": reclaimed, "dry_run": dry_run}
 
     def merge(self, other_root: str | Path) -> int:
-        """Fold another store into this one (see scripts/worker.py).
+        """Fold another store into this one.
 
         Distributed embedding used to require both machines to check the repo
         out at an identical absolute path, because the cache key was a hash of
         that path. Content addressing removes the constraint entirely: two
         stores built anywhere can be merged by copying rows neither side has.
+
+        THE PATH IS CHECKED BEFORE IT IS OPENED. `EmbeddingStore` creates its
+        index if it is missing, which is right for a first run and wrong for a
+        merge: handed a directory holding no store -- most likely the other
+        machine's `cache_root`, one level above its `embeddings/` -- SQLite
+        would create an empty database there, and this would report "merged 0
+        rows" as a success. A merge that finds nothing is far more likely to be
+        the wrong path than an empty store, so it says so, and points at the
+        `embeddings/` subdirectory when that is what the caller meant.
         """
+        other_root = Path(other_root)
+        if not (other_root / "index.sqlite").is_file():
+            nested = other_root / "embeddings" / "index.sqlite"
+            hint = (
+                f"\n        Did you mean {other_root / 'embeddings'}? A store lives one level "
+                f"below cache_root."
+                if nested.is_file()
+                else "\n        A store root is the directory holding index.sqlite, which is "
+                "<cache_root>/embeddings."
+            )
+            raise SystemExit(f"[cache] no store at {other_root}: index.sqlite is not there.{hint}")
+
         other = EmbeddingStore(other_root)
         try:
             copied = 0

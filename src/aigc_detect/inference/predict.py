@@ -7,12 +7,25 @@ Deliverable 5.5.2. Contract (from the challenge brief):
     Output: a JSON array of objects [{"image_path": <str>, "pred": <float 0..1>}, ...]
     where pred is P(AIGC) -- 1.0 = AI-generated, 0.0 = real.
 
-PREPROCESSING PARITY IS THE WHOLE POINT OF THIS MODULE. It must reproduce
-embed.py's pipeline exactly:
+TIER 7: "LOAD BUNDLE, RUN." This module used to open a raw checkpoint dict,
+read `scaler_mean`/`scaler_std` off it, and apply `(x - mean) / std` by hand --
+a THIRD copy of that arithmetic (`train_head_on_views` and `demo/server.py`
+each carried their own), and the decision threshold lived here too, as a
+module constant (`DECISION_THRESHOLD`) calibrated for exactly one checkpoint
+and never re-derived automatically on a swap. Both are gone now:
+`inference.bundle.load_bundle` reads the checkpoint (native bundle or legacy
+`.pt`, upgraded in memory) and hands back a `Bundle` that already knows its own
+preprocessing (`Bundle.features`, a `FeaturePipeline`) and its own threshold
+(`Bundle.threshold`/`threshold_source`). There is no per-model branching left
+here: every checkpoint in `models/`, `models/archive/`, or a fresh
+`data/runs/*/bundle.pt` goes through the same four lines below.
 
-  1. Read the backbone key from the checkpoint's "backbone" field (never
+PREPROCESSING PARITY IS STILL THE WHOLE POINT OF THIS MODULE. It must
+reproduce embed.py's pipeline exactly:
+
+  1. Read the backbone key from the bundle (`Bundle.backbone.key`), never
      hardcode it -- a checkpoint trained on a different backbone than assumed
-     would silently produce plausible-looking garbage scores).
+     would silently produce plausible-looking garbage scores.
   2. Load that backbone via `aigc_detect.registry.backbones.load_backbone`, which
      reports the backbone's OWN native_res and norm_mean/norm_std. These are
      per-backbone (PE-Core-L is 336px / 0.5,0.5,0.5; others differ) --
@@ -25,12 +38,12 @@ embed.py's pipeline exactly:
      resize + center crop to native_res (build_backbone_transform), then
      ToImage/ToDtype/Normalize with the backbone's own stats. No training-
      time augmentation -- inference is always the deterministic "clean" path.
-  4. Standardize the pooled embedding with the checkpoint's OWN scaler_mean/
-     scaler_std before the head. This scaler is a trained artifact (TRAIN-set
-     embedding statistics from train_head.py / train_head_on_views), not
-     something to recompute from the inference batch -- recomputing it here
-     would re-center every batch around its own mean, which erases exactly
-     the shift a real-vs-AIGC embedding carries relative to the training
+  4. Run the pooled embedding through the bundle's OWN `FeaturePipeline`
+     (`Bundle.features.transform`) before the head. That pipeline is a
+     trained artifact (fit on TRAIN-set embedding statistics), not something
+     to recompute from the inference batch -- recomputing it here would
+     re-center every batch around its own mean, which erases exactly the
+     shift a real-vs-AIGC embedding carries relative to the training
      distribution (the signal the head was fit to detect).
 
 Everything above matches eval_grid.py's "load a saved head and apply it"
@@ -50,8 +63,8 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision.transforms import v2
 
 from aigc_detect.data.transforms import build_backbone_transform
+from aigc_detect.inference.bundle import load_bundle
 from aigc_detect.registry.backbones import load_backbone
-from aigc_detect.registry.heads import build_head
 
 # Case-insensitive; brief doesn't specify tiff/gif so kept to the common web set.
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
@@ -116,57 +129,6 @@ def _to_posix_relative(path: Path, input_dir: Path) -> str:
     return rel.as_posix()
 
 
-# Operating point for turning P(AIGC) into a verdict.
-#
-# The JSON contract is fixed by the brief -- {"image_path", "pred"} with pred the
-# raw probability -- so this never changes what is written. It sets the decision
-# boundary for the console summary, for demo/server.py, and for anything else
-# that needs a yes/no rather than a score.
-#
-# 0.98, not 0.5. Chosen on a HELD-OUT split so the number is not tuned on the
-# tier it is reported against. The protocol is no longer prose: it lives in
-# scripts/derive_threshold.py, which pins the split that was twice reconstructed
-# by hand and twice came out different. Re-derive on every head swap --
-#
-#     uv run python scripts/derive_threshold.py --head models/<name>.pt
-#
-# WildRF (2,503 real Reddit/X/Facebook photographs and real-world AI, which
-# nothing trains on) pooled over clean + the CDN-like views a browser extension
-# actually sees (jpeg_q70, jpeg_q90, resize_0.5x, chain_light), split by IMAGE so
-# no image appears on both sides, swept in 0.005 steps, picked by F1 on half A,
-# reported on half B:
-#
-#     head              chosen   HELD-OUT FPR   HELD-OUT TPR
-#     photoreal          0.920         0.0408         0.9721
-#     trainext           0.940         0.0283         0.9686
-#     nosd3_e1           0.990         0.0180         0.9692   <-- previous
-#     alltransforms_e1   0.985         0.0248         0.9768
-#     allsev_e1          0.980         0.0215         0.9797   <-- SHIPPING
-#
-# NOTE the previous head shipped at 0.985, not the 0.990 above. That 0.985 came
-# from a split that was never recorded and cannot be reproduced. Every row here
-# comes from the one pinned split, so the rows are comparable to each other even
-# where they differ from what was historically shipped.
-#
-# allsev_e1 vs nosd3_e1 is NOT strict dominance. It is +1.05 points of recall
-# (95% CI [+0.51, +1.68]) at an FPR difference of +0.34 points whose CI spans
-# zero. Matched on either axis it wins the other: at nosd3_e1's own FPR its
-# recall is .9771 vs .9692 (97 misses -> 72); at allsev_e1's own recall its FPR
-# is .0215 vs .0251. The decisive margin is on degradations NEITHER head trained
-# on -- the three scored chains -- where OOD recall at a matched 2.5% FPR goes
-# .4183 -> .6098. See FINDINGS 2l.
-#
-# It is the 1-EPOCH arm. train_head_on_views saves the final epoch with no
-# best-epoch selection and epoch 2 overfits robustness (allsev_e2 gives the whole
-# gain back: ood transformed mean .9724 -> .9693). Train with --epochs 1.
-#
-# At threshold 0.5 the same tier gives FPR 0.1875 / TPR 0.9949, so this is a
-# large cut in false positives for a small amount of recall. That trade is right
-# for this product: telling someone their own photograph is AI-generated costs
-# far more than missing one AI image among many.
-DECISION_THRESHOLD = 0.980
-
-
 def run_inference(
     input_dir: str | Path,
     head_path: str | Path,
@@ -175,44 +137,39 @@ def run_inference(
     num_workers: int = 4,
     threshold: float | None = None,
 ) -> Path:
-    threshold = DECISION_THRESHOLD if threshold is None else float(threshold)
     input_dir = Path(input_dir)
     head_path = Path(head_path)
     output_path = Path(output_path)
 
     if not input_dir.is_dir():
         raise SystemExit(f"[predict] --input_dir does not exist or is not a directory: {input_dir}")
-    if not head_path.exists():
-        raise SystemExit(f"[predict] head checkpoint not found: {head_path}")
 
-    # Requirement 3: the backbone key comes from the checkpoint, never a flag
-    # or a hardcoded default -- a head is only valid against the exact
-    # backbone it was trained on (eval_grid.py enforces the same rule).
-    ckpt = torch.load(head_path, map_location="cpu", weights_only=False)
-    backbone_key = ckpt["backbone"]
-    head_kind = ckpt["head_kind"]
-    in_dim = ckpt["in_dim"]
-    scaler_mean = np.asarray(ckpt["scaler_mean"], dtype=np.float32)
-    scaler_std = np.asarray(ckpt["scaler_std"], dtype=np.float32)
+    # "Load bundle, run." Works identically for a bundle native to this tier
+    # and for any of the 25 archived legacy checkpoints -- `load_bundle`
+    # upgrades the latter in memory (see inference.bundle's docstring), so
+    # docs/findings.md's numbers stay reproducible with zero branching here.
+    bundle = load_bundle(head_path)
+    backbone_key = bundle.backbone.key
+    head_kind = bundle.head_kind
+    threshold = bundle.threshold if threshold is None else float(threshold)
 
-    print(f"[predict] head={head_path.name} backbone={backbone_key} head_kind={head_kind} in_dim={in_dim}")
+    print(f"[predict] head={head_path.name} backbone={backbone_key} head_kind={head_kind} "
+          f"bundle_version={bundle.bundle_version}")
+    print(f"[predict] threshold={threshold:g} (source: {bundle.threshold_source})")
 
     module, pooled_dim, native_res = load_backbone(backbone_key)
-    if pooled_dim != in_dim:
+    if pooled_dim != bundle.backbone.dim:
         raise SystemExit(
             f"[predict] backbone '{backbone_key}' pooled_dim={pooled_dim} does not match the "
-            f"checkpoint's in_dim={in_dim} -- checkpoint/backbone mismatch."
+            f"bundle's recorded dim={bundle.backbone.dim} -- checkpoint/backbone mismatch."
         )
     print(
         f"[predict] backbone native_res={native_res} pooled_dim={pooled_dim} "
         f"norm_source={module.norm_source} mean={module.norm_mean} std={module.norm_std}"
     )
 
-    head = build_head(head_kind, in_dim)
-    head.load_state_dict(ckpt["state_dict"])
-    head.eval()
     device = next(module.parameters()).device
-    head.to(device)
+    head = bundle.build_head().to(device)
 
     # Same transform as embed.py's precompute_embeddings: aspect-preserving
     # resize + center crop at the backbone's OWN native_res, then the
@@ -255,13 +212,12 @@ def run_inference(
             images = images.to(device, non_blocking=True)
             with torch.autocast(device_type="cuda", enabled=use_amp):
                 feats = module(images)
-            feats = feats.float()
-            # Checkpoint's scaler, not batch statistics -- see module docstring
-            # point 4. Standardizing on the inference batch would re-center
-            # around whatever this particular folder happens to contain.
-            mean_t = torch.from_numpy(scaler_mean).to(feats.device)
-            std_t = torch.from_numpy(scaler_std).to(feats.device)
-            x = (feats - mean_t) / std_t
+            feats_np = feats.float().cpu().numpy()
+            # Bundle's own FeaturePipeline, not batch statistics -- see module
+            # docstring point 4. Standardizing on the inference batch would
+            # re-center around whatever this particular folder happens to
+            # contain.
+            x = torch.from_numpy(bundle.features.transform({backbone_key: feats_np})).to(device)
             logits = head(x).squeeze(-1)
             # RAW sigmoid, deliberately. Do not "improve" this with calibration.
             #

@@ -123,6 +123,7 @@ from aigc_detect.cli import (
     embed,
     env,
     evaluate,
+    experiment,
     predict,
     preview,
     pull,
@@ -154,6 +155,7 @@ def build_parser() -> argparse.ArgumentParser:
     recipes.register_manifest(sub)
     recipes.register_corpus(sub)
     pull.register_pull(sub)
+    experiment.register_experiment(sub)
 
     return parser
 

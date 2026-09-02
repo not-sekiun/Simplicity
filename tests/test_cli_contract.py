@@ -53,6 +53,7 @@ EXPECTED_SUBCOMMANDS = [
     "manifest",
     "corpus",
     "pull",
+    "experiment",
 ]
 
 

@@ -1,0 +1,42 @@
+# The one config that runs end to end on a machine holding only the CLEAN view.
+#
+# WHY IT EXISTS. `allsev_e1` and `dinov3_linear` declare all 19 severity views;
+# reproducing either needs every one of them cached for `train_ext` and `val`,
+# which after the Tier 5 corpus move means a real GPU re-embed (the store holds
+# every deterministic view, but the stochastic ones were deliberately not
+# migrated -- see AGENTS.md on the content-id seeding change). That left the
+# experiment runner itself unexercisable against real data, which is a bad
+# state for the piece of the pipeline every future run goes through.
+#
+# This config asks for `clean` only, on the internal 85/15 split. Both views it
+# needs project out of the content-addressed store for free, so it runs in
+# under a minute on CPU and exercises the whole path for real: resolve, fit the
+# feature pipeline, train, calibrate against WildRF, write the run directory,
+# save a bundle.
+#
+# It is NOT a research recipe. A head trained on the clean view alone is the
+# arm `docs/experiments.md` records as the weak one -- robustness is what the
+# severity views buy. Read its numbers as "the plumbing works", never as a
+# result.
+description: >
+  Smoke recipe: clean view only, internal train/val split. Runs anywhere the
+  clean view is cached; exercises the full runner without a GPU re-embed.
+trainer:
+  kind: probe
+manifest: train
+backbone: pe-core-l
+views: [clean]
+features:
+  - {op: gather, backbone: pe-core-l}
+  - {op: standardize}
+head:
+  kind: linear
+train:
+  epochs: 1
+  lr: 1.0e-3
+  batch_size: 128
+  weight_decay: 0.0
+val:
+  manifest: val
+balance: true
+seed: 42

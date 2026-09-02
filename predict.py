@@ -4,9 +4,11 @@
     uv run python predict.py --input_dir <dir> --output preds.json
 
 Thin CLI wrapper only. All real logic lives in
-src/aigc_detect/predict.py::run_inference, which this module shares with
-`main.py predict` -- see that module's docstring for the preprocessing-parity
-requirements this satisfies.
+src/aigc_detect/inference/predict.py::run_inference, which this module shares
+with `main.py predict` -- see that module's docstring for the preprocessing-
+parity requirements this satisfies. Tier 7: `run_inference` now loads a
+`Bundle` (`inference.bundle.load_bundle`), so the shipping checkpoint's own
+threshold travels with it instead of being read off a module constant here.
 """
 
 from __future__ import annotations

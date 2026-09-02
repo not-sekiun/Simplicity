@@ -96,6 +96,28 @@ class Settings:
     def has_kaggle_credentials(self) -> bool:
         return bool(self.kaggle_username and self.kaggle_key)
 
+    @property
+    def store_root(self) -> Path:
+        """Where the content-addressed embedding store actually lives.
+
+        `cache_root` holds TWO things -- the vector store under `embeddings/`
+        and the path-hash memo `hashes.sqlite` -- so `cache_root` is not itself
+        an `EmbeddingStore` root. Three call sites appended `"embeddings"` by
+        hand and a fourth forgot, which is a silent failure rather than a loud
+        one: SQLite happily CREATES a database that is not there, so the caller
+        got a second, empty store beside the real one, every lookup missed, and
+        the bundles it wrote carried no `bb_id` and no normalization stats --
+        the revision pin stopped being load-bearing in the one artifact whose
+        whole job is to carry it. Opening the store through one property rather
+        than four string joins is what makes that unrepeatable.
+        """
+        return self.cache_root / "embeddings"
+
+    @property
+    def hash_db_path(self) -> Path:
+        """The path -> (mtime, size, image id) memo, cache_root's other half."""
+        return self.cache_root / "hashes.sqlite"
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

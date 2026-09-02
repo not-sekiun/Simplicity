@@ -37,9 +37,10 @@ def register_predict(sub):
     )
     p_predict.add_argument("--threshold", type=float, default=None,
                            help="Decision boundary for the flagged/not-flagged summary line "
-                                "(default: predict.DECISION_THRESHOLD = 0.980, chosen on a held-out "
-                                "WildRF split). Does NOT change the JSON, which always carries the "
-                                "raw probability in 'pred' as the brief requires.")
+                                "(default: the head's own bundle threshold, e.g. 0.980 for the "
+                                "shipping head -- see Bundle.threshold_source). Does NOT change the "
+                                "JSON, which always carries the raw probability in 'pred' as the "
+                                "brief requires.")
     p_predict.add_argument("--batch-size", type=int, default=32)
     p_predict.add_argument("--num-workers", type=int, default=4)
     p_predict.set_defaults(func=cmd_predict)

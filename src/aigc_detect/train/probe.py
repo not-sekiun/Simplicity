@@ -6,6 +6,16 @@ overridable by CLI flag (see main.py's `train-head` subcommand).
 
 Features are standardized (zero mean, unit std) using TRAIN-set statistics
 only -- the val set never contributes to the scaler, to avoid leakage.
+
+Standardization itself is delegated to :class:`aigc_detect.train.features.FeaturePipeline`
+(a `gather` + `standardize` pipeline over one backbone) rather than computed
+inline, as it used to be -- see that module's docstring for why: it used to be
+a private implementation detail of this function, duplicated by hand in
+`demo/server.py`. `train_head_on_views` fits the pipeline once, from the clean
+train view only, then reuses it for every other view's rows and for
+`_grid_auc`'s validation pass, exactly as before -- this is a delegation, not a
+behaviour change: the arithmetic, order, and saved `scaler_mean`/`scaler_std`
+checkpoint fields are unchanged.
 """
 
 from __future__ import annotations
@@ -30,6 +40,7 @@ from aigc_detect.config import (
 )
 from aigc_detect.data.transforms import eval_view_names, train_chain_view_names
 from aigc_detect.registry.heads import build_head
+from aigc_detect.train.features import FeaturePipeline
 
 
 def _load_npz(path: Path):
@@ -38,10 +49,6 @@ def _load_npz(path: Path):
     labels = data["labels"].astype(np.int64)
     sources = data["sources"].astype(str)
     return embeddings, labels, sources, data
-
-
-def _standardize(x: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
-    return (x - mean) / std
 
 
 def _assert_fresh(npz_path: Path, manifest_path: Path, tag: str) -> None:
@@ -110,14 +117,14 @@ TRAIN_VIEWS_ALL_SEVERITIES = tuple(
 ) + train_chain_view_names()
 
 
-def _grid_auc(head, device, view_arrays, mean, std) -> tuple[float, float]:
+def _grid_auc(head, device, view_arrays, pipeline: FeaturePipeline, backbone_key: str) -> tuple[float, float]:
     """(AUC_clean, AUC_robust pooled) over cached val views -- the actual
     objective, watched per epoch instead of clean accuracy alone."""
     head.eval()
     probs_by_view = {}
     with torch.no_grad():
         for name, (emb, _lab) in view_arrays.items():
-            x = torch.from_numpy((emb - mean) / std).to(device)
+            x = torch.from_numpy(pipeline.transform({backbone_key: emb})).to(device)
             probs_by_view[name] = torch.sigmoid(head(x).squeeze(-1)).cpu().numpy()
 
     clean_labels = view_arrays["clean"][1]
@@ -296,9 +303,13 @@ def train_head_on_views(
     )
 
     clean_emb, _clean_labels = train_arrays["clean"]
-    mean = clean_emb.mean(axis=0)
-    std = clean_emb.std(axis=0)
-    std[std == 0] = 1.0
+    # See module docstring: gather+standardize, fit on the clean TRAIN view
+    # only. `pipeline.ops[-1]` is the fitted StandardizeOp -- its mean/std are
+    # what the checkpoint has always saved as scaler_mean/scaler_std.
+    pipeline = FeaturePipeline.from_spec(
+        [{"op": "gather", "backbone": backbone_key}, {"op": "standardize"}]
+    ).fit({backbone_key: clean_emb})
+    mean, std = pipeline.ops[-1].mean, pipeline.ops[-1].std
 
     all_sets = [train_arrays, *extra_arrays]
 
@@ -333,7 +344,9 @@ def train_head_on_views(
             else:
                 print(f"[train-views] excluded from stem={stem}: nothing matched")
 
-    x = np.concatenate([(arrays[v][0] - mean) / std for v in train_views for arrays in all_sets])
+    x = np.concatenate(
+        [pipeline.transform({backbone_key: arrays[v][0]}) for v in train_views for arrays in all_sets]
+    )
     y = np.concatenate([arrays[v][1] for v in train_views for arrays in all_sets]).astype(np.float32)
 
     held_out = sorted(set(val_arrays) - set(train_views))
@@ -390,7 +403,7 @@ def train_head_on_views(
             optimizer.step()
             total += loss.item() * xb.size(0)
             seen += xb.size(0)
-        auc_clean, auc_robust = _grid_auc(head, device, val_arrays, mean, std)
+        auc_clean, auc_robust = _grid_auc(head, device, val_arrays, pipeline, backbone_key)
         print(
             f"[train-views] epoch {epoch}/{epochs}  train_loss={total / seen:.4f}  "
             f"val AUC_clean={auc_clean:.4f}  AUC_robust(pooled)={auc_robust:.4f}  "
@@ -461,13 +474,16 @@ def train_head(
         f"-- did you generate them with the same --backbone?"
     )
 
-    # Standardize using TRAIN statistics only (no val leakage).
-    mean = train_emb.mean(axis=0)
-    std = train_emb.std(axis=0)
-    std[std == 0] = 1.0  # guard against dead/constant dims
+    # Standardize using TRAIN statistics only (no val leakage). Same
+    # gather+standardize FeaturePipeline train_head_on_views uses -- see this
+    # module's docstring.
+    pipeline = FeaturePipeline.from_spec(
+        [{"op": "gather", "backbone": backbone_key}, {"op": "standardize"}]
+    ).fit({backbone_key: train_emb})
+    mean, std = pipeline.ops[-1].mean, pipeline.ops[-1].std
 
-    train_emb_s = _standardize(train_emb, mean, std)
-    val_emb_s = _standardize(val_emb, mean, std)
+    train_emb_s = pipeline.transform({backbone_key: train_emb})
+    val_emb_s = pipeline.transform({backbone_key: val_emb})
 
     print(
         f"[train-head] backbone={backbone_key} head={head_kind} in_dim={in_dim} "

@@ -408,10 +408,10 @@ def precompute_view_embeddings(
             "run without autocast would be widened back from fp16, not recovered."
         )
 
-    cache_root = get_settings().cache_root
+    settings = get_settings()
     with (
-        EmbeddingStore(cache_root / "embeddings") as store,
-        HashCache(cache_root / "hashes.sqlite") as hashes,
+        EmbeddingStore(settings.store_root) as store,
+        HashCache(settings.hash_db_path) as hashes,
     ):
         ident = identity_from_module(backbone_key, module, pooled_dim, native_res)
         ident.register(store)

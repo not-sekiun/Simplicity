@@ -1,0 +1,41 @@
+# Acceptance test for the Tier 7 seam: "change backbone: dinov3-l in an
+# experiment YAML and everything downstream works with no other edit."
+# Differs from allsev_e1.yaml in exactly two lines (backbone: and the
+# matching features.gather.backbone:) -- manifest, views, head and train
+# hyperparameters are untouched, because nothing about them is backbone
+# specific once features.py owns the gather/standardize step.
+#
+# NOT smoke-tested in this tier: dinov3-l has no cached embeddings on this
+# machine (`data/embeddings/dinov3-l__*` is empty), and embedding train_ext
+# from scratch is exactly the "no long GPU runs" this tier avoids. Run
+# `uv run aigc embed-views --backbone dinov3-l --manifest train_ext
+# --with-chains --all-severities` (plus the four extra manifests and val)
+# before `aigc experiment run dinov3_linear` will have anything to read.
+description: >
+  Same recipe as allsev_e1, backbone swapped to dinov3-l -- demonstrates the
+  backbone is a config value, not a code path.
+trainer:
+  kind: probe
+manifest: train_ext
+backbone: dinov3-l
+views: all_severities
+features:
+  - {op: gather, backbone: dinov3-l}
+  - {op: standardize}
+head:
+  kind: linear
+train:
+  epochs: 1
+  lr: 1.0e-3
+  batch_size: 128
+  weight_decay: 0.0
+val:
+  manifest: val
+  sample_rows: 2000
+extra_train:
+  - {manifest: sid_real}
+  - {manifest: unsplash_real}
+  - {manifest: nano_banana}
+  - {manifest: midjourney_v6}
+balance: true
+seed: 42
