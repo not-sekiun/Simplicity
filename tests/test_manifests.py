@@ -12,6 +12,14 @@ eval set carrying the same name.
 
 These tests read committed CSVs and corpus indexes. They do not open a single
 image, so they run anywhere; the tests that need pixels belong to the embedder.
+
+ONE RECIPE IS THE EXCEPTION: `sid_real` (and `photo_real`, which includes it)
+declares `filter.require_on_disk: true` -- see `sid_real.yaml`'s own docstring
+on why the check is real and not a formality. Resolving it therefore silently
+drops every row whose file is not on disk rather than raising, so on a fresh
+clone it resolves to an empty frame instead of a wrong one. `_recipe_needs_images`
+below is what tells that case apart from an actual regression, per
+`tests/conftest.py`'s `needs_images`.
 """
 
 from __future__ import annotations
@@ -29,6 +37,7 @@ from aigc_detect.data.manifest import (
     resolve,
     resolved_path,
 )
+from tests.conftest import images_present
 
 #: Row counts carried over from the hand-built CSVs each recipe replaced.
 #:
@@ -59,6 +68,25 @@ MIGRATED_ROW_COUNTS = {
 
 RECIPES = list_recipes()
 
+_MANIFEST_PREFIX = "manifest:"
+
+
+def _recipe_needs_images(name: str, _seen: frozenset[str] = frozenset()) -> bool:
+    """True if resolving this recipe stats real image bytes on disk, directly
+    (`filter.require_on_disk`) or through an included manifest (`photo_real`
+    includes `manifest:sid_real`). Everything else resolves purely from
+    committed index.csv/YAML and needs no pixels to be correct.
+    """
+    if name in _seen:
+        return False
+    recipe = load_recipe(name)
+    if recipe.spec.get("filter", {}).get("require_on_disk"):
+        return True
+    return any(
+        ref.startswith(_MANIFEST_PREFIX) and _recipe_needs_images(ref[len(_MANIFEST_PREFIX):], _seen | {name})
+        for ref in recipe.includes
+    )
+
 
 def _frames_match(got: pd.DataFrame, ref: pd.DataFrame) -> bool:
     """Compare on the columns the reference actually carries.
@@ -85,24 +113,28 @@ def test_recipe_reproduces_its_resolved_csv(name):
     committed = resolved_path(name)
     if not committed.exists():
         pytest.skip(f"{name} has not been resolved yet")
+    if _recipe_needs_images(name) and not images_present():
+        pytest.skip(f"{name}'s recipe uses require_on_disk -- images not on this machine")
     assert _frames_match(resolve(name), pd.read_csv(committed))
 
 
 @pytest.mark.parametrize("name", sorted(MIGRATED_ROW_COUNTS))
 def test_recipe_still_holds_the_images_it_inherited(name):
     """What survives of the migration proof, now that the originals are deleted."""
+    if _recipe_needs_images(name) and not images_present():
+        pytest.skip(f"{name}'s recipe uses require_on_disk -- images not on this machine")
     assert len(resolve(name)) == MIGRATED_ROW_COUNTS[name]
 
 
 @pytest.mark.parametrize("name", RECIPES)
-def test_every_path_is_relative_and_resolves(name):
+def test_every_path_is_relative_and_posix(name):
     """Manifests are portable artifacts, not machine-specific ones.
 
-    Two assertions in one, and the second is the one with teeth: a relative
-    path that resolves against the wrong root is exactly the failure this tier
-    introduced the risk of, and it is silent -- `sid_real` resolved to ZERO rows
-    during the corpus move because one `require_on_disk` check was still
-    resolving against the working directory.
+    This is the half of the check that needs no pixels: every path is a
+    string, read straight from the committed CSV/YAML. The half with teeth --
+    does a path actually resolve to a file -- is
+    `test_every_path_resolves_to_a_real_file` below, because that one needs
+    images on disk and this one does not.
     """
     df = resolve(name)
     paths = df["image_path"].astype(str)
@@ -110,7 +142,17 @@ def test_every_path_is_relative_and_resolves(name):
     assert not absolute, f"{name}: {len(absolute)} absolute path(s), e.g. {absolute[0]}"
     assert all("\\" not in p for p in paths), f"{name}: a path carries backslashes"
 
-    # Spot-check rather than stat 100k files: a wrong root fails on any row.
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_every_path_resolves_to_a_real_file(name, needs_images):
+    """A relative path that resolves against the wrong root is exactly the
+    failure this tier introduced the risk of, and it is silent -- `sid_real`
+    resolved to ZERO rows during the corpus move because one `require_on_disk`
+    check was still resolving against the working directory. Spot-checked
+    rather than stating every file: a wrong root fails on any row.
+    """
+    df = resolve(name)
+    paths = df["image_path"].astype(str)
     for raw in list(paths[:: max(1, len(paths) // 25)])[:25]:
         assert resolve_image_path(raw).is_file(), f"{name}: does not resolve to a file: {raw}"
 
@@ -173,8 +215,14 @@ def test_wildrf_train_reals_and_test_tier_share_no_image():
     assert set(resolve("wildrf_real").image_path).isdisjoint(set(resolve("wildrf_test").image_path))
 
 
-def test_sid_real_carries_no_fakes():
-    """The whole reason SID_Set is usable at all -- see sid_real.yaml."""
+def test_sid_real_carries_no_fakes(needs_images):
+    """The whole reason SID_Set is usable at all -- see sid_real.yaml.
+
+    Needs images: `sid_real.yaml`'s `require_on_disk` filter means this
+    resolves to an EMPTY frame rather than raising when the images are not on
+    disk, and an empty label set is not `{0}` either -- the assertion below
+    would fail for the wrong reason without the skip.
+    """
     assert set(resolve("sid_real").label.unique()) == {0}
 
 

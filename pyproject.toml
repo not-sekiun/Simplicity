@@ -73,7 +73,11 @@ dev = [
 [tool.ruff]
 line-length = 110
 target-version = "py311"
-src = ["src", "scripts", "tests"]
+# "." is what makes `tests`, `apps` and `scripts` first-party to isort: they are
+# top-level packages of THIS repo, not third-party installs, and without the repo
+# root on this list ruff sorts `from tests.conftest import ...` in among pandas
+# and pytest. "src" stays for `aigc_detect`, which lives one level down.
+src = [".", "src", "scripts", "tests"]
 extend-exclude = [".venv", "data", "models", "reports", "docs", ".refactor_baseline"]
 
 [tool.ruff.lint]
