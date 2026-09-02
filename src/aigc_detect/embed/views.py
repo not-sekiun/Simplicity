@@ -93,8 +93,8 @@ from tqdm import tqdm
 from aigc_detect.cache.hashing import HashCache
 from aigc_detect.cache.identity import identity_from_module
 from aigc_detect.cache.store import EmbeddingStore, view_id
-from aigc_detect.config import EMBEDDINGS_DIR, RANDOM_SEED, ROOT_DIR, get_settings
-from aigc_detect.data.dataset import ManifestImageDataset
+from aigc_detect.config import EMBEDDINGS_DIR, RANDOM_SEED, get_settings
+from aigc_detect.data.dataset import ManifestImageDataset, resolve_image_path
 from aigc_detect.data.transforms import (
     build_robustness_views,
     eval_view_names,
@@ -204,16 +204,6 @@ def load_view_cache(
             if key in d:
                 meta[key] = d[key].astype(str)
     return embeddings, labels, meta
-
-
-def resolve_image_path(raw: str | Path) -> Path:
-    """A manifest path as this module opens it: relative entries hang off ROOT_DIR.
-
-    Hashing and decoding must agree on which file a row names, so both go
-    through here rather than each re-deriving the rule.
-    """
-    p = Path(str(raw))
-    return p if p.is_absolute() else ROOT_DIR / p
 
 
 def view_seed(image_id: str, view: str) -> int:
