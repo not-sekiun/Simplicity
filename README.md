@@ -1,7 +1,5 @@
 <p align="center"><img alt="Simplicity Logo" src="logo.png", width=33%></p>
 
-# (For judges) See [here](#usage-to-infer-predictions-from-a-directory-of-images) to run  the script on a directory of images to produce predictions in a json file and [here](#setup-and-installation) on setting up the model (will download a 1.4Gb backbone model from huggingface)
-
 To get a prediction, install dependencies and then run the predict script
 
 ```python
